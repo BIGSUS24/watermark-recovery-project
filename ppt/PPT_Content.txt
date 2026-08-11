@@ -1,0 +1,174 @@
+PPT CONTENT — Watermark-Guided Tamper Localization and Recovery
+(source content used to build slides.pptx — kept as plain text for editing/reference)
+
+Slide 1: Watermark-Guided Tamper Localization and Recovery
+- Watermark-Guided Tamper Localization and Recovery
+- Self-embedding fragile watermarking that detects WHERE an image was altered — and rebuilds it
+- Final Year Project — B.E./B.Tech, Computer Science & Engineering / IT
+- Submitted by: (Student Name(s), Roll No.)
+- Project Guide: (Guide Name, Designation)
+- Department of CSE/IT, (College Name)
+- Academic Year: (2026-27)
+
+Slide 2: Problem Statement
+- Editing an image is now a 10-second job — phone apps, one-click AI inpainting
+- Tampered images drive real damage: misinformation, forged insurance/accident evidence, doctored ID and legal document scans, altered medical scans
+- Courts and newsrooms need proof of integrity, not opinion
+- Existing tools answer only one question: "Is this fake?"
+- A single yes/no verdict is not actionable: doesn't say which region was altered, doesn't say what was there before, destroyed evidence stays destroyed
+- Gap addressed: detection + localization + recovery of the original content
+
+Slide 3: Objectives
+1. Embed a self-contained fragile watermark into an image — no external database, the image carries its own backup
+2. Detect tampering at block level and output a precise tamper localization mask
+3. Recover an approximate version of tampered regions from redundant data stored elsewhere in the same image
+4. Keep the watermark imperceptible — target PSNR > 40 dB vs the original
+5. Build an automated evaluation pipeline with self-generated ground-truth masks across 4 tamper types, measured on precision/recall/F1/IoU and recovery PSNR/SSIM
+6. Achieve all of the above with classical, explainable signal processing — no training data, no GPU
+
+Slide 4: Literature Survey
+- Traditional passive forgery detection (copy-move, JPEG-artifact, noise/CFA inconsistency, error-level analysis) — no prior watermark needed, but heuristic, sensitive to post-processing, coarse localization, no recovery
+- Deep-learning forgery/deepfake detectors (CNN, transformer, segmentation-based) — strong on benchmarks, but need large labelled datasets + GPU, generalize poorly to unseen manipulations, black-box confidence scores
+- Robust watermarking (DCT/DWT, spread-spectrum) — designed to survive attacks for copyright proof, deliberately insensitive to tampering, unsuitable for authentication
+- Fragile/semi-fragile watermarking — correct family for tamper detection; most published schemes stop at detect-and-localize only; self-recovery variants exist but are underused in student/practical work
+- Consolidated gap: detection-only pipelines, weak explainability, dependence on training data, no restoration of altered content
+
+Slide 5: Proposed System Overview
+- Image treated as a grid of small 8x8 blocks
+- Before distribution: every block compressed into a tiny "recovery code" hidden inside a distant partner block's LSBs; each block also carries a hash of itself
+- Every block has a backup living somewhere far away in the same image
+- After the image is shared/attacked: re-read every block, recompute its hash — match = authentic, mismatch = tampered, marked on a binary mask
+- For each tampered block, fetch its recovery code from its (surviving) partner and repaint the region
+- Output: watermarked image, tamper mask, recovered image, plus full numeric report
+- Plain language: the image carries its own insurance policy, and can heal itself
+
+Slide 6: System Architecture / Block Diagram
+(Diagram: left-to-right flow, vertical split after embedding)
+- Stage 1 — Input: "Original Image (grayscale/RGB)"
+- Stage 2 — Block Partitioning: image overlaid with 8x8 non-overlapping grid, blocks numbered 1..N
+- Stage 3 — Recovery Data Generation: per block, "Block DCT -> keep low-frequency coefficients / downsampled average -> quantize -> bitstring"
+- Stage 4 — Key-Seeded Block Mapping: "Secret Key -> CSPRNG -> single-cycle permutation m(i)"; curved arrow from block i to a far-away block m(i), labelled "recovery bits of i stored in m(i)"
+- Stage 5 — LSB Embedding: "Embed into LSBs — partner's recovery bits + own authentication hash (bound to block index + image ID)" -> output "Watermarked Image" (PSNR/SSIM measured here)
+- Branch A (test path only, dashed box): "Tamper Simulation — splice / object removal / crop-refill / noise block" -> "Tampered Image" + "Ground-Truth Mask"
+- Stage 6 — Detection: "Read LSBs -> extract stored hash; recompute hash from current pixels -> compare" -> "Tamper Localization Mask"
+- Stage 7 — Recovery: "For each flagged block i -> read backup from partner m(i) -> inverse-quantize/inverse-DCT -> repaint block" -> "Recovered Image"
+- Stage 8 — Evaluation: mask vs ground truth (P/R/F1/IoU), recovered vs original (PSNR/SSIM in tampered region), recoverability rate
+- Key icon feeds both Stage 4 and Stage 6 as a side input
+
+Slide 7: Methodology — Embedding
+- Step 1 — Prepare: load image, pad to multiple of 8, split into N non-overlapping 8x8 blocks
+- Step 2 — Clear LSB plane: zero the 2 LSBs of every pixel so watermark bits are deterministic and hash is stable
+- Step 3 — Recovery data per block: 2D DCT -> keep low-frequency coefficients -> quantize to compact bitstring (or 2x2 mean-pooled average as a lightweight alternative)
+- Step 4 — Partner mapping: seed CSPRNG with secret key -> generate a single-cycle permutation m(i), enforcing minimum spatial separation between i and m(i)
+  Reason: a local tamper must not destroy a block AND its own backup at once
+- Step 5 — Authentication hash: keyed hash of block's own MSB content, bound to block index + image ID (defeats block-swap counterfeiting attacks)
+- Step 6 — Embed: write into block i's LSBs -> recovery bits of the block that maps onto it + block i's own hash tag
+- Output: watermarked image, visually identical, only LSBs changed
+
+Slide 8: Methodology — Detection & Recovery
+- Detection: split received image into same 8x8 grid -> extract stored hash tag -> recompute hash from current MSB content -> match = authentic, mismatch = tampered -> collect into binary tamper localization mask (with neighbourhood refinement to clean isolated false flags)
+- Recovery: for each tampered block i, look up partner m(i) -> if authentic, read recovery bits, inverse-transform, repaint block -> if partner ALSO tampered, mark explicitly UNRECOVERABLE (never silently faked)
+- Why fully explainable: every flagged pixel traces to exactly one hash mismatch on one named block — no probability score, no black box
+- Deterministic: same key + same image -> identical result, every run
+- Honest scope note: designed for a lossless pipeline (PNG) the system owns end-to-end — not for catching unknown external forgeries after JPEG re-compression
+
+Slide 9: Tools & Technologies Used
+- Python 3.x — core implementation language
+- NumPy — block partitioning, LSB bit-plane manipulation, vectorized math
+- OpenCV (cv2) — image I/O, DCT/IDCT, morphological mask cleanup, inpainting fallback
+- scikit-image — PSNR and SSIM metric computation
+- hashlib/hmac (stdlib) — keyed authentication tags bound to block index + image ID
+- NumPy CSPRNG — secret-key-seeded block mapping
+- Matplotlib — result plots and visual comparisons
+- Streamlit — interactive demo UI (upload, embed, tamper, detect, recover, live in browser)
+- Pandas — aggregating metrics into result tables
+- No TensorFlow/PyTorch, no dataset download, no GPU — runs fully offline, zero cost
+
+Slide 10: Implementation Snapshot
+(5-panel figure a-e, plus Streamlit UI screenshot)
+- (a) Original Image
+- (b) Watermarked Image — visually identical, PSNR/SSIM caption
+- (c) Tampered Image — object pasted in, or region removed/refilled
+- (d) Detected Tamper Mask — white = flagged, overlay in red on tampered image
+- (e) Recovered Image — repainted from partner-block backups, recovery PSNR caption
+- Second screenshot: Streamlit demo, sidebar with secret key + block size + tamper-type selector, live metric table
+
+Slide 11: Results — Imperceptibility
+- Question: does embedding visibly damage the image?
+- Metric: PSNR/SSIM of watermarked vs original
+- MEASURED, 32-image corpus (8 USC-SIPI + 24 Kodak): Variant A (DCT) mean 43.17 dB / SSIM 0.9824; Variant B (mean-pooled) mean 44.23 dB / SSIM 0.9844; Lena 43.22/44.31 dB, SSIM 0.9814/0.9839
+- Table columns: Descriptor Variant | PSNR (dB) | SSIM — rows for Variant A, Variant B, Lena example
+- Result: PSNR > 43 dB, SSIM > 0.97 on every image — watermark imperceptible
+- Reason: only 2 LSBs modified per pixel -> analytical reference point ~44.15 dB
+- Trade-off stated: more bits = better recovery, lower PSNR; 2 bits chosen as the operating point
+
+Slide 12: Results — Detection & Localization
+- Ground truth is exact (self-generated by our own tamper script, not hand-labelled)
+- MEASURED, block-level, 864 tamper trials (4 classes x 3 ratios x corpus): overall block precision 1.0000, recall 1.0000
+- Table columns: Tamper Type | Block Prec. | Block Recall | Block F1 | Block IoU — rows for splicing (1.0000/1.0000/1.0000/1.0000), object removal (1.0000/1.0000/1.0000/1.0000), crop-refill (1.0000/1.0000/1.0000/1.0000), noise (1.0000/1.0000/1.0000/1.0000), Overall (1.0000/1.0000/1.0000/1.0000)
+- Block metrics are saturated near 1.0; pixel-level precision mean is 0.9489 — the gap is block-grid quantization (a flagged 8x8 block is reported whole even if only part was altered), not false alarms
+- Security-fix finding: binding the recovery descriptor into the authentication tag eliminated the MSB-preserved miss category entirely (previously 0.143 blocks/row, almost all in object removal) — recall is now exactly 1.0000 on every tamper class, so object removal no longer carries any recall disadvantage
+- Null condition: 0 false positives across 1,802,240 independent block verifications (32 images x 2 variants x 5 keys); rule-of-three 95% upper bound on false-accept rate = 1.66e-6
+
+Slide 13: Results — Recovery Quality
+- Question: how close is the healed region to the true original, and how does that change with tamper area?
+- Metric: in-region PSNR (recovered vs original, inside tampered region only) and whole-image (unmarked) PSNR, both measured, Variant A
+- RESTRUCTURED from tamper-type to tamper-RATIO rows: that is the axis the most interesting measured finding varies over
+- Table columns: Tamper Ratio | Recoverability (rho) | In-Region PSNR (dB) | Whole-Image PSNR (dB) — rows: 10% (0.9590, 28.96, 33.79), 25% (0.8036, 28.44, 23.87), 50% (0.5335, 28.38, 17.39)
+- KEY FINDING: in-region PSNR stays essentially flat as tamper ratio grows (28.96 -> 28.44 -> 28.38 dB); whole-image PSNR collapses (33.79 -> 23.87 -> 17.39 dB). Coverage (rho), not descriptor fidelity, drives whole-image quality
+- Security/performance trade-off: removing the block-mapping structural leak (quadrant interleave -> flat keyed shuffle) cost about 1.5 points of rho at every ratio (e.g. 0.9736 -> 0.9590 at 10%, 0.8353 -> 0.8036 at 25%, 0.5469 -> 0.5335 at 50%) — the measured price of removing a bias an attacker with no key could exploit, not a regression
+- Honest limitation: at 50% tamper our 17.39 dB is well below Korus & Dziech's reported 37 dB — reference-sharing/fountain-code schemes degrade gracefully, our one-to-one partner mapping does not (see Future Scope)
+
+Slide 14: Comparison with Existing Approaches
+Table — Capability vs: Passive detection | Deep-learning detectors | Fragile watermarking (detect-only) | Learned Proactive WM (EditGuard/DeepMark/RecoverMark) | Proposed System
+- Detects tampering: Partial | Yes | Yes | Yes | Yes
+- Localizes tampering: Coarse | Yes | Yes | Yes (learned) | Yes (block-precise)
+- Recovers original content: No | No | No | Yes (learned) | Yes (deterministic)
+- Needs training data: No | Yes, large+labelled | No | Yes, large | No
+- Needs GPU: No | Usually yes | No | Yes (train+infer) | No
+- Explainable decision: Partly | No (black-box score) | Yes | No (network output) | Yes (traces to one hash mismatch)
+- Deterministic/reproducible: Mostly | No | Yes | No | Yes
+- Requires prior watermarking: No | No | Yes | Yes | Yes (the trade-off we accept)
+- Honest framing: recent learned proactive watermarks (EditGuard CVPR 2024, DeepMark 2026, RecoverMark 2026) ALSO localize and recover — we do NOT claim unique recovery capability. Our defensible axis vs. that family: zero training data, zero GPU, fully deterministic, and fully auditable (every decision traces to one recomputed keyed hash comparison anyone holding the key can redo)
+
+Slide 15: Applications
+- Digital forensic evidence — CCTV, crime-scene/accident photos watermarked at capture
+- Journalism & media authentication — news agencies watermark on ingest
+- Medical imaging integrity — X-ray/MRI/CT slices in PACS, altered diagnostic regions flagged and approximately restored
+- Legal & official document scans — cheques, contracts, mark sheets, ID cards, land records
+- Insurance claim verification — damage photos proven unedited before settlement
+- Government/e-governance archives — long-term integrity of scanned public records
+- Secure camera/device firmware — self-authenticating images at the sensor level
+
+Slide 16: Limitations & Future Scope
+Limitations (honest):
+- Fragile to benign processing — JPEG re-compression, resizing, filtering destroy the watermark; assumes lossless storage (PNG/BMP/TIFF)
+- Block-size trade-off — smaller blocks = sharper localization but less recovery capacity
+- Recovery is approximate, not pixel-perfect
+- Large-area tampering degrades recovery — if a block and its partner are both destroyed, region is unrecoverable
+- Security depends fully on secret-key confidentiality
+- Requires pre-embedding — cannot authenticate legacy images never watermarked
+Future Scope:
+- Semi-fragile/robust embedding (quantized DCT/DWT) to tolerate mild JPEG compression
+- Reference-sharing / redundant backups per block to survive large-area attacks
+- Adaptive block size — finer in textured/edge regions, coarser in flat regions
+- Small unsupervised vector-quantization codebook for smarter recovery encoding (no GPU, no labels)
+- Extension to video (per-frame + temporal partner mapping)
+- Content-adaptive recovery — more bits for regions of interest (faces, text, diagnostic areas)
+- Integration as a camera-side SDK / mobile app; hybrid pairing with passive detectors for unwatermarked images
+
+Slide 17: Conclusion
+- Designed and implemented a block-based self-embedding fragile watermarking system that detects tampering, localizes it to individual 8x8 blocks, and recovers the altered content from backup data hidden in key-mapped partner blocks
+- Achieved imperceptible embedding (measured PSNR 43.17-44.23 dB across descriptor variants, SSIM 0.9824-0.9844), block-level localization precision 1.0000 / recall 1.0000, and 28.4-29.0 dB in-region recovery PSNR that stays flat across tamper ratio even as whole-image PSNR falls from 33.79 to 17.39 dB, across four tamper types with exact self-generated ground truth
+- Delivered entirely with classical, deterministic Python/OpenCV signal processing — explainable, reproducible, offline, zero-cost — going one decisive step beyond conventional forgery detectors, which only flag tampering and cannot restore what was lost
+
+Slide 18: References
+- (Reference list to insert here — must match the IEEE paper's reference list)
+- Suggested coverage: fragile & self-recovery watermarking surveys, DCT-based image authentication, LSB steganography capacity/imperceptibility analysis, image forgery detection surveys, deep-learning forgery detection reviews, standard test-image sources, PSNR/SSIM metric papers, OpenCV/scikit-image documentation
+
+Slide 19: Thank You
+- Thank You
+- Questions & Discussion
+- Live demo available on request — upload an image, tamper it, watch it heal
+- Contact: (email) | Project repository: (link)
+- Guide: (Guide Name) | Department of CSE/IT, (College Name)

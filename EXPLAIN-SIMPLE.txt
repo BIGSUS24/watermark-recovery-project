@@ -1,0 +1,106 @@
+OUR PROJECT, EXPLAINED SIMPLY
+(no jargon, no assumed knowledge — anyone can read this and understand what we built and why)
+
+======================================================
+THE PROBLEM, IN ONE LINE
+======================================================
+Anyone can edit a photo in 10 seconds now (phone apps, free AI tools) — and there's no easy way to prove a photo wasn't touched, or to get back what was removed/changed.
+
+======================================================
+WHY THIS MATTERS (REAL EXAMPLES)
+======================================================
+- A news photo gets an object added or removed before it's published — readers can't tell.
+- Someone submits a damage photo for an insurance claim, but part of it was edited to look worse (or better) than reality.
+- A medical scan gets altered before or after being saved.
+- A legal document photo (a cheque, an ID card, a contract) gets a number or name quietly changed.
+
+In all these cases, right now, most tools can only tell you "yes, something looks off" or "no, looks fine." That's it. They can't tell you exactly where it was changed, and they definitely can't give you back what was there originally.
+
+======================================================
+OUR IDEA, IN ONE LINE
+======================================================
+We built a system that watches its own back. Before an image ever leaves the camera or the archive, we quietly hide a tiny "backup copy" of every part of the image, inside a different part of the SAME image. If someone tampers with it later, the image can point to exactly where it was hurt — and partially heal itself.
+
+Think of it like this: imagine tearing a page out of a book, but every sentence on every page had already been secretly copied onto some other page, far away, in tiny handwriting. Tear out one page, and the rest of the book can tell you which page is missing, and roughly rebuild what it said.
+
+======================================================
+HOW IT ACTUALLY WORKS, STEP BY STEP
+======================================================
+
+STEP 1 — CUT THE IMAGE INTO TINY SQUARES
+We chop the image into a grid of small 8x8 pixel squares (like cutting a photo into hundreds of tiny stickers). We call each of these squares a "block."
+
+STEP 2 — GIVE EVERY BLOCK A "SUMMARY" OF ITSELF
+For every block, we make a small, compressed summary of what that block looks like — kind of like a low-quality thumbnail of just that one tiny square. This summary is small enough to hide, but big enough that we can roughly rebuild the block later from it.
+
+STEP 3 — GIVE EVERY BLOCK A FAR-AWAY "BUDDY"
+Using a secret password (a "key"), we randomly pair up every block with another block that's physically far away in the image. Why far away? Because if someone tampers with one small area of the photo (like pasting a fake object into a corner), we don't want that same tampering to accidentally destroy both a block AND its backup at the same time. Keeping the buddy far away means one small edit almost never wipes out both copies.
+
+STEP 4 — HIDE THE SUMMARY INSIDE THE BUDDY, SECRETLY
+Every image pixel has some tiny bits of information that are so unimportant, changing them is basically invisible to the human eye (this is like changing the very last decimal place of a number — nobody notices). We hide each block's "summary" (from Step 2) inside these invisible bits of its far-away buddy block. Nobody looking at the photo can tell anything was hidden — the photo looks 100% normal.
+
+STEP 5 — ALSO HIDE A "FINGERPRINT" OF EACH BLOCK, IN ITSELF
+Separately, each block also hides a tiny fingerprint/signature of its own content (locked with the same secret password) inside its own invisible bits. This fingerprint is tied to that specific block's position AND to the specific image — so it can't be copy-pasted from a different photo and still "pass" as real (we specifically closed this loophole, more on that below).
+
+At the end of Steps 1-5, we have a "watermarked" image — looks exactly the same to a human eye, but now every block is secretly carrying a fingerprint of itself and a backup of some other block.
+
+STEP 6 — SOMEONE TAMPERS WITH IT (this is the "attack" we test against)
+To prove our system works, we deliberately damage test copies of the image in realistic ways:
+- pasting an object from another photo into it (splicing)
+- removing an object and filling the hole (object removal)
+- cutting out a region and covering it with fake filler texture (crop-and-refill)
+- corrupting a region with random noise
+
+STEP 7 — CHECK EVERY BLOCK'S FINGERPRINT
+When we get an image back and want to check if it's been tampered with, we re-calculate the fingerprint for every block right now, and compare it to the fingerprint that was secretly hidden in that block. If they match — block is untouched. If they don't match — block was tampered with. Doing this for every block gives us an exact map of WHERE the tampering happened. This is the "localization" part.
+
+STEP 8 — HEAL THE DAMAGED PARTS
+For every block that was flagged as tampered, we go find its far-away "buddy" block and pull out the backup summary that was hidden there (as long as the buddy block itself wasn't also damaged). We use that summary to repaint an approximate version of the damaged block. This is the "recovery" part — the image literally heals itself, using its own hidden backups. If both a block AND its buddy got damaged at once, we're honest about it and mark that part as "cannot be recovered" instead of faking something and pretending it's real.
+
+STEP 9 — MEASURE HOW WELL IT WORKED
+We check three things with real numbers:
+1. Is the hidden watermark actually invisible? (compare the watermarked photo to the original — should look almost identical)
+2. Did we correctly find WHERE the tampering happened? (compare our tamper map to the real, known tampered area — since we did the tampering ourselves, we know exactly where it is, so this comparison is exact, not a guess)
+3. How good is the healed/recovered version compared to the real original? (compare pixel by pixel, in just the damaged area)
+
+======================================================
+WHY THIS IS DIFFERENT FROM "NORMAL" FAKE-IMAGE DETECTORS
+======================================================
+Most tools you hear about (deepfake detectors, forgery detectors) work AFTER the fact — they look at a photo and guess "this looks fake" using AI trained on thousands of examples. Problems with that approach:
+- They only give a "yes/no fake" answer with a confidence score — they can't tell you exactly where or explain WHY.
+- They need huge amounts of training data and often a powerful graphics card (GPU) to run.
+- Nobody can fully explain WHY the AI decided something looks fake — it's a "black box."
+- They definitely can't give you back what was removed.
+
+Our system is completely different, on purpose:
+- No AI model, no training data, no GPU needed. Just math and a secret key. Runs instantly on a normal laptop.
+- Every decision is 100% explainable: "this block's fingerprint didn't match" is a fact you can double check yourself, not a guess.
+- It doesn't just detect tampering — it tries to undo it.
+- The tradeoff (being fully honest about it): our system only works if the watermark was hidden in the image BEFORE it got tampered with. It can't catch tampering on a random photo you found online that was never watermarked in the first place. Think of it less like "catch any liar" and more like "a security seal you put on your own boxes before shipping them" — you control the box from the start.
+
+======================================================
+WHAT WE ARE HONEST ABOUT (LIMITATIONS)
+======================================================
+- If the image gets compressed, resized, or saved as a JPEG after we watermark it, our hidden data gets wiped out, because we're hiding it in the "unimportant tiny bits" of the image, which is exactly what compression throws away first. So this only works on images kept in their original, uncompressed form (like PNG files).
+- The recovered/healed regions look a bit blurry/softened, not perfectly sharp — because we're only hiding a small, compressed summary, not the full original block.
+- If tampering is spread out across a big chunk of the image (not just one small area), some blocks and their far-away buddies might both get damaged at the same time — in that case, we openly mark that part as "unrecoverable" instead of pretending to fix it.
+- The whole system's security depends on the secret key staying secret. If someone steals the key, they could re-fake the fingerprints.
+
+We think stating limitations honestly, instead of hiding them, is part of what makes this a strong project — a reviewer asking "what if X" should already find X answered in our own report.
+
+======================================================
+WHAT MAKES THIS A GOOD FINAL YEAR PROJECT
+======================================================
+- Zero cost — runs on a normal laptop, no hardware to buy, no dataset to hunt down (we generate our own test data and know exactly where the "damage" is, so our evaluation numbers are trustworthy, not guessed).
+- Real, measurable results — not just "it works," but actual numbers: how invisible the watermark is, how accurately we find tampering, how good the recovery looks.
+- A live demo that's easy to understand — show a photo, damage it on purpose in front of people, watch the system point to the damage and then repair it.
+- Not the same as what everyone else is doing — most students building "AI detects fake images" projects are doing detection-only, with a black-box AI model. We do detection AND recovery, with a fully explainable system, and we say clearly why we chose it this way.
+
+======================================================
+WHAT WE ACTUALLY BUILT / ARE BUILDING
+======================================================
+1. A research paper (IEEE format) explaining the method in full technical detail, with real background research, the design, and how we test it.
+2. A presentation (PowerPoint) covering the whole project for a live audience — problem, idea, how it works, tools used, results, comparison to other approaches, limits, and next steps.
+3. The actual working code (in progress) — the program that does the hiding, the tampering (for testing), the detecting, and the healing, plus a simple on-screen demo.
+
+This file is the "explain it to anyone" version. The paper is the "explain it to an expert" version. The PPT is the "explain it out loud to a room" version. All three describe the exact same project — just aimed at different audiences.

@@ -1,0 +1,27 @@
+SANITY GATE REPORT -- E:\cheat\Selection\watermark-recovery-project\output\runs.csv
+========================================================================================
+[PASS] row counts vs expected grid (main 768 + null 320 + ablation 96 = 1184)  total=1184/1184; main=768/768; null=320/320; ablation=96/96
+[PASS] no duplicate run_id                                                     1184 rows, 1184 unique run_ids
+[PASS] recoverability_rate / psnr_in_region column pairing                     recoverability_rate present=True, psnr_in_region present=True
+[PASS] wm_psnr mean (variant A)                                                mean=43.1725 dB (band 42.8-43.6, n=384, skipped=0)
+[PASS] wm_psnr mean (variant B)                                                mean=44.2288 dB (band 43.9-44.6, n=384, skipped=0)
+[PASS] wm_psnr max (variant A)                                                 max=43.3847 (<= 44.3, n=384)
+[PASS] wm_psnr max (variant B)                                                 max=44.5231 (<= 44.7, n=384)
+[PASS] wm_ssim min (variant A)                                                 min=0.97183 (>= 0.96, n=384)
+[PASS] wm_ssim min (variant B)                                                 min=0.97064 (>= 0.96, n=384)
+[PASS] null false-positive blocks (sum)                                        sum=0 across 320 null rows / 1802240 block checks (must be exactly 0)
+[PASS] block_precision mean (all tamper rows)                                  mean=1.0000 (>= 0.98, n=864, skipped=0)
+[PASS] block_recall mean (all tamper rows)                                     mean=1.0000 (>= 0.97, n=864, skipped=0)
+[PASS] psnr_whole_unmarked mean @ ratio 0.10                                   mean=33.6661 dB (band 28-40, n=288, skipped=0)
+[PASS] psnr_whole_unmarked mean @ ratio 0.25                                   mean=23.8144 dB (band 22-36, n=288, skipped=0)
+[PASS] psnr_whole_unmarked mean @ ratio 0.50                                   mean=17.3119 dB (band 13-32, n=288, skipped=0)
+[PASS] psnr_in_region mean (all tamper rows, all ratios)                       mean=28.1210 dB (band 22-36, n=864, skipped=0)
+[PASS] rho monotonicity: rho(0.10)>=rho(0.25)>=rho(0.50)                       rho(0.10)=0.9606 rho(0.25)=0.8061 rho(0.50)=0.5343
+[PASS] recoverability_rate has no NaN/inf                                      0 of 1184 rows have NaN/inf recoverability_rate
+[PASS] psnr_whole_marked <= psnr_whole_unmarked (per row)                      29 of 1184 rows (2.4%) have marked>unmarked; classes=['noise', 'splice']
+[PASS] soft: psnr_in_region < 18 dB anywhere                                   0 rows with psnr_in_region < 18 dB
+[PASS] soft: n_coincidental_unchanged_px > 0.5% of n_tampered_px               0 of 864 tamper rows exceed 0.5% coincidental-unchanged px
+[PASS] soft: n_msb_preserved_miss_blocks > 0 anywhere                          0 MSB-preserved-miss blocks across 0 rows (expected-miss category for smooth inpainting, not a bug)
+[PASS] soft: mean px_precision >= 0.80                                         mean=0.9516 (n=864)
+----------------------------------------------------------------------------------------
+23 passed, 0 failed, 0 skipped, 0 warnings -- overall: PASS

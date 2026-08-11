@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Watermark Studio — tamper detection &amp; recovery</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- SIDEBAR ================================================================ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-glyph" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3l7 3v6c0 4.2-2.9 7.6-7 9-4.1-1.4-7-4.8-7-9V6l7-3z"/>
+          <path d="M9 12.2l2.1 2.1L15.4 10"/>
+        </svg>
+      </span>
+      <span class="brand-text">
+        <strong>Watermark Studio</strong>
+        <small>tamper localization &amp; recovery</small>
+      </span>
+    </div>
+
+    <nav class="nav" id="nav">
+      <button class="nav-item is-active" data-view="protect">
+        <span class="nav-dot" aria-hidden="true"></span>Protect an image
+      </button>
+      <button class="nav-item" data-view="verify">
+        <span class="nav-dot" aria-hidden="true"></span>Verify an upload
+      </button>
+      <button class="nav-item" data-view="library">
+        <span class="nav-dot" aria-hidden="true"></span>Library
+        <span class="nav-count" id="nav-count" hidden>0</span>
+      </button>
+      <button class="nav-item" data-view="attacks">
+        <span class="nav-dot" aria-hidden="true"></span>Attack lab
+      </button>
+      <button class="nav-item" data-view="about">
+        <span class="nav-dot" aria-hidden="true"></span>How it works
+      </button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <button class="btn btn-ghost btn-sm" id="theme-toggle" aria-label="Toggle light and dark theme">
+        <span id="theme-icon" aria-hidden="true">◐</span><span id="theme-label">Dark</span>
+      </button>
+      <p class="fine">Runs entirely on this machine. No data leaves it.</p>
+    </div>
+  </aside>
+
+  <!-- MAIN =================================================================== -->
+  <main class="main">
+
+    <!-- VIEW: PROTECT ------------------------------------------------------- -->
+    <section class="view is-active" id="view-protect">
+      <header class="page-head">
+        <h1>Protect an image</h1>
+        <p>Embed an invisible, keyed watermark, then download the protected file. Every
+          image protected here is saved to the library so a tampered copy can be
+          recognised and repaired later.</p>
+      </header>
+
+      <article class="card">
+        <div class="card-head">
+          <h2><span class="num">1</span>Choose an image</h2>
+        </div>
+        <div class="seg" role="tablist" aria-label="Image source">
+          <button class="seg-btn is-active" data-src="sample" role="tab" aria-selected="true">Sample image</button>
+          <button class="seg-btn" data-src="upload" role="tab" aria-selected="false">Upload my own</button>
+        </div>
+
+        <div class="src-pane is-active" id="src-sample">
+          <label class="lbl" for="sample-select">Test corpus (USC-SIPI + Kodak)</label>
+          <select id="sample-select"><option>Loading…</option></select>
+        </div>
+
+        <div class="src-pane" id="src-upload">
+          <label class="drop" id="protect-drop" for="upload-input">
+            <input type="file" id="upload-input" accept="image/png,.png" hidden>
+            <span class="drop-glyph" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 16V4m0 0L8 8m4-4l4 4"/><path d="M4 16v2.5A1.5 1.5 0 005.5 20h13a1.5 1.5 0 001.5-1.5V16"/>
+              </svg>
+            </span>
+            <span class="drop-main">Drop a PNG here, or click to browse</span>
+            <span class="drop-sub">PNG only — a fragile watermark cannot survive JPEG re-encoding</span>
+          </label>
+          <div class="drop-file" id="protect-file" hidden></div>
+        </div>
+
+        <details class="adv">
+          <summary>Advanced settings</summary>
+          <div class="grid grid-4">
+            <div class="field">
+              <label class="lbl" for="key-input">Secret key</label>
+              <input type="text" id="key-input" value="watermark-secret">
+            </div>
+            <div class="field">
+              <label class="lbl" for="id-input">Image identity</label>
+              <input type="text" id="id-input" placeholder="auto">
+            </div>
+            <div class="field">
+              <label class="lbl" for="block-select">Block size</label>
+              <select id="block-select">
+                <option value="8" selected>8 × 8 (default)</option>
+                <option value="4">4 × 4 (finer)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="lbl" for="variant-select">Descriptor</label>
+              <select id="variant-select">
+                <option value="A" selected>A — DCT (default)</option>
+                <option value="B">B — mean-pooled</option>
+              </select>
+            </div>
+          </div>
+          <p class="fine">The key and identity are what make the watermark forgery-resistant.
+            Both are stored with the image in the local library so it can be verified again later.</p>
+        </details>
+
+        <div class="actions">
+          <button class="btn btn-primary" id="protect-btn">Protect this image</button>
+          <span class="status" id="protect-status"></span>
+        </div>
+      </article>
+
+      <article class="card" id="protect-result" hidden>
+        <div class="card-head">
+          <h2><span class="num">2</span>Protected</h2>
+          <span class="badge badge-ok" id="saved-badge"></span>
+        </div>
+
+        <div class="stats" id="protect-stats"></div>
+
+        <div class="compare">
+          <figure><img id="img-original" alt="Original image"><figcaption>Original</figcaption></figure>
+          <figure>
+            <img id="img-watermarked" alt="Protected image">
+            <figcaption id="wm-caption">Protected</figcaption>
+          </figure>
+        </div>
+
+        <label class="switch">
+          <input type="checkbox" id="diff-toggle">
+          <span>Reveal the hidden watermark (amplified ×50)</span>
+        </label>
+
+        <div class="actions">
+          <a class="btn btn-primary" id="download-protected" download>Download protected image</a>
+          <button class="btn btn-ghost" id="goto-verify">Go to Verify →</button>
+        </div>
+        <p class="fine">Download it, edit any part of it in any image editor, save as PNG,
+          then upload it under <strong>Verify an upload</strong>. The system will find it in
+          the library and show you exactly what you changed.</p>
+      </article>
+
+      <article class="card" id="protect-test" hidden>
+        <div class="card-head">
+          <h2><span class="num">3</span>Or test it right here</h2>
+        </div>
+        <p class="lead">Damage the protected image, detect it, and repair it — without leaving
+          this page.</p>
+
+        <div class="btn-row">
+          <button class="btn" data-kind="corner">Damage a corner</button>
+          <button class="btn" data-kind="middle">Damage the middle</button>
+          <button class="btn" data-kind="scatter">Scattered damage</button>
+        </div>
+        <details class="adv">
+          <summary>Damage an exact region</summary>
+          <div class="grid grid-4">
+            <div class="field"><label class="lbl" for="rect-y0">Top</label><input type="number" id="rect-y0" value="0" min="0"></div>
+            <div class="field"><label class="lbl" for="rect-x0">Left</label><input type="number" id="rect-x0" value="0" min="0"></div>
+            <div class="field"><label class="lbl" for="rect-y1">Bottom</label><input type="number" id="rect-y1" value="96" min="1"></div>
+            <div class="field"><label class="lbl" for="rect-x1">Right</label><input type="number" id="rect-x1" value="96" min="1"></div>
+          </div>
+          <button class="btn btn-sm" id="damage-exact-btn">Damage this region</button>
+        </details>
+        <span class="status" id="damage-status"></span>
+
+        <div id="damage-out" hidden>
+          <div class="compare one">
+            <figure><img id="img-tampered" alt="Damaged image"><figcaption id="tampered-caption">Damaged</figcaption></figure>
+          </div>
+          <div class="actions">
+            <a class="btn btn-ghost" id="download-damaged" href="/api/download/damaged" download>Download damaged copy</a>
+            <button class="btn btn-primary" id="check-btn">Detect the tampering</button>
+            <span class="status" id="check-status"></span>
+          </div>
+        </div>
+
+        <div id="check-out" hidden>
+          <div class="banner" id="verdict-banner" role="status" aria-live="polite">
+            <span class="banner-icon" id="verdict-icon" aria-hidden="true"></span>
+            <span id="verdict-text"></span>
+          </div>
+          <p class="warn-note" id="suspect-note" hidden></p>
+          <div class="tabs" id="stage-tabs"></div>
+          <div class="frame"><img id="stage-img" alt="Detection overlay"></div>
+          <p class="cap" id="stage-caption"></p>
+          <div class="stats" id="loc-stats"></div>
+          <div class="actions">
+            <button class="btn btn-primary" id="repair-btn">Repair it</button>
+            <span class="status" id="repair-status"></span>
+          </div>
+        </div>
+
+        <div id="repair-out" hidden>
+          <div class="compare one">
+            <figure><img id="img-repaired" alt="Repaired image">
+              <figcaption>Repaired — magenta hatch marks blocks that could not be recovered</figcaption></figure>
+          </div>
+          <div class="stats" id="repair-stats"></div>
+          <div class="actions">
+            <a class="btn btn-ghost" id="download-repaired" href="/api/download/repaired" download>Download repaired image</a>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <!-- VIEW: VERIFY -------------------------------------------------------- -->
+    <section class="view" id="view-verify">
+      <header class="page-head">
+        <h1>Verify an upload</h1>
+        <p>Upload any protected image — untouched, edited, or badly damaged. The system
+          identifies which library record it is, compares it against the stored original,
+          and repairs what the watermark can reconstruct.</p>
+      </header>
+
+      <article class="card">
+        <label class="drop" id="verify-drop" for="verify-input">
+          <input type="file" id="verify-input" accept="image/png,.png" hidden>
+          <span class="drop-glyph" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="6"/><path d="M15.5 15.5L20 20"/>
+            </svg>
+          </span>
+          <span class="drop-main">Drop the image to check, or click to browse</span>
+          <span class="drop-sub">It must be a PNG that this app protected earlier</span>
+        </label>
+        <div class="drop-file" id="verify-file" hidden></div>
+        <div class="actions">
+          <button class="btn btn-primary" id="verify-btn" disabled>Identify and verify</button>
+          <span class="status" id="verify-status"></span>
+        </div>
+      </article>
+
+      <article class="card" id="verify-result" hidden>
+        <div class="card-head"><h2>Identification</h2></div>
+        <div class="match" id="match-card"></div>
+
+        <div class="banner" id="v-verdict-banner" role="status" aria-live="polite">
+          <span class="banner-icon" id="v-verdict-icon" aria-hidden="true"></span>
+          <span id="v-verdict-text"></span>
+        </div>
+        <p class="warn-note" id="v-suspect-note" hidden></p>
+
+        <div class="stats" id="verify-stats"></div>
+
+        <div class="tabs" id="verify-tabs"></div>
+        <div class="frame"><img id="verify-img" alt="Verification view"></div>
+        <p class="cap" id="verify-caption"></p>
+
+        <div class="actions">
+          <button class="btn btn-primary" id="v-repair-btn">Repair this image</button>
+          <a class="btn btn-ghost" id="v-download-stored" download>Download the stored original</a>
+          <span class="status" id="v-repair-status"></span>
+        </div>
+
+        <div id="v-repair-out" hidden>
+          <div class="compare one">
+            <figure><img id="v-img-repaired" alt="Repaired image">
+              <figcaption>Repaired — magenta hatch marks blocks that could not be recovered</figcaption></figure>
+          </div>
+          <div class="stats" id="v-repair-stats"></div>
+          <div class="actions">
+            <a class="btn btn-primary" id="v-download-repaired" href="/api/download/repaired" download>Download repaired image</a>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <!-- VIEW: LIBRARY ------------------------------------------------------- -->
+    <section class="view" id="view-library">
+      <header class="page-head">
+        <h1>Library</h1>
+        <p>Every image protected by this app, stored byte-for-byte with the key and identity
+          needed to verify it again. This is what an uploaded file gets matched against.</p>
+      </header>
+      <div class="actions">
+        <button class="btn btn-ghost btn-sm" id="library-refresh">Refresh</button>
+        <span class="status" id="library-status"></span>
+      </div>
+      <div class="lib-grid" id="library-grid"></div>
+      <div class="empty" id="library-empty" hidden>
+        <p>The library is empty. Protect an image first — it will appear here.</p>
+      </div>
+    </section>
+
+    <!-- VIEW: ATTACKS ------------------------------------------------------- -->
+    <section class="view" id="view-attacks">
+      <header class="page-head">
+        <h1>Attack lab</h1>
+        <p>Two set-pieces that show where the scheme holds and where it honestly gives up.
+          Both need a protected image, so run <strong>Protect</strong> first.</p>
+      </header>
+
+      <article class="card">
+        <div class="card-head"><h2>Forgery: transplant a valid signature</h2></div>
+        <p class="lead">Copy a block — pixels and all, signature included — from elsewhere in
+          the same protected image, and paste it over a different position.</p>
+        <div class="actions">
+          <button class="btn btn-primary" id="transplant-btn">Run the forgery attempt</button>
+          <span class="status" id="transplant-status"></span>
+        </div>
+        <div id="transplant-result" hidden></div>
+      </article>
+
+      <article class="card">
+        <div class="card-head"><h2>The coincidence case: when repair is impossible</h2></div>
+        <p class="lead">Destroy a block <em>and</em> the one block holding its only backup.</p>
+        <div class="actions">
+          <button class="btn btn-primary" id="coincidence-btn">Run the coincidence attack</button>
+          <span class="status" id="coincidence-status"></span>
+        </div>
+        <div id="coincidence-result" hidden></div>
+      </article>
+
+      <article class="card">
+        <div class="card-head"><h2>Per-block evidence</h2></div>
+        <p class="lead">The raw evidence behind any single block's verdict: stored tag,
+          recomputed tag, and the decision in plain English.</p>
+        <div class="grid grid-2">
+          <div class="field"><label class="lbl" for="evidence-block">Block number</label>
+            <input type="number" id="evidence-block" value="0" min="0"></div>
+          <div class="field"><label class="lbl" for="evidence-channel">Channel</label>
+            <select id="evidence-channel">
+              <option value="0">Red</option><option value="1">Green</option><option value="2">Blue</option>
+            </select></div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="evidence-btn">Show the evidence</button>
+          <span class="status" id="evidence-status"></span>
+        </div>
+        <div id="evidence-card" hidden></div>
+      </article>
+    </section>
+
+    <!-- VIEW: ABOUT --------------------------------------------------------- -->
+    <section class="view" id="view-about">
+      <header class="page-head">
+        <h1>How it works</h1>
+        <p>The whole scheme in four steps, and the limits that come with it.</p>
+      </header>
+
+      <div class="steps">
+        <article class="card step">
+          <span class="step-n">01</span><h2>Split every 8×8 block's budget in two</h2>
+          <p>Each block gets 128 hidden bits: a 32-bit keyed signature of <em>itself</em>,
+            and a 96-bit compressed backup of a <em>different, far-away</em> block.</p>
+        </article>
+        <article class="card step">
+          <span class="step-n">02</span><h2>Hide them in the two lowest bits</h2>
+          <p>Only the two least-significant bits of each pixel change, so the image looks
+            identical — around 43 dB PSNR. The signature covers the six upper bits, so
+            embedding can never invalidate itself.</p>
+        </article>
+        <article class="card step">
+          <span class="step-n">03</span><h2>Detect by recomputation</h2>
+          <p>Verification recomputes every signature from the pixels in front of it. A
+            mismatch means that exact block changed. The signature is bound to the image's
+            identity <em>and</em> the block's position, so a valid signature moved elsewhere
+            still fails.</p>
+        </article>
+        <article class="card step">
+          <span class="step-n">04</span><h2>Repair from the surviving backup</h2>
+          <p>Each flagged block is rebuilt from the backup held by its intact partner. If
+            that partner was destroyed too, the block is marked unrecoverable rather than
+            filled with invented pixels.</p>
+        </article>
+      </div>
+
+      <article class="card">
+        <div class="card-head"><h2>Honest limitations</h2></div>
+        <ul class="limits">
+          <li><strong>PNG only, by design.</strong> The watermark lives in the two
+            least-significant bits. JPEG or lossy WEBP re-encoding destroys it — a stated
+            property of a deliberately fragile watermark, not a bug.</li>
+          <li><strong>Only images it protected first.</strong> There is nothing to verify in
+            an image that was never watermarked, which is why the library exists.</li>
+          <li><strong>Repair is an approximation.</strong> Recovery rebuilds a low-frequency
+            version of what was destroyed — visibly softer, never pixel-perfect.</li>
+          <li><strong>Resizing or cropping breaks it.</strong> The block grid no longer lines
+            up, so verification fails everywhere rather than pointing at a region.</li>
+          <li><strong>The demo key sits next to the image.</strong> Fine for a local tool,
+            wrong for deployment: real systems keep keys in a keyring or HSM, never beside
+            the file they authenticate.</li>
+        </ul>
+      </article>
+    </section>
+
+  </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

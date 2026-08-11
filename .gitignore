@@ -1,0 +1,52 @@
+# --- user data -------------------------------------------------------------
+# The protected-image library is whatever the person running the app protected.
+# It holds their images AND the keys those images were signed with. Never commit it.
+webapp/library.db
+webapp/*.db
+
+# --- third-party corpus ----------------------------------------------------
+# 21 MB of USC-SIPI and Kodak images that are not ours to redistribute. They are
+# not needed in the repo: samples/fetch_corpus.py downloads them and checks every
+# file against the SHA-256 hashes pinned in samples/manifest.csv, which IS committed.
+# So a fresh clone reproduces the exact same corpus, byte for byte.
+samples/usc_sipi/
+samples/kodak/
+
+# --- regenerable output ----------------------------------------------------
+# Intermediate per-panel renders that src/plots.py stitches into the paper's
+# figures. The finished figures and tables in output/figures and output/tables
+# ARE committed; these inputs to them are 6.5 MB and rebuild in seconds.
+output/images/
+output/*.log
+
+# Superseded results from before the descriptor-authentication security fix.
+# Deliberately excluded: these numbers describe the VULNERABLE variant and would
+# be mistaken for current results by anyone reading the repo.
+output/*.bak
+
+# --- python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# --- editors / os ----------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- latex build artifacts -------------------------------------------------
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.out
+*.synctex.gz
+*.toc
+paper/*.log
+paper/*.pdf

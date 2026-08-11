@@ -1,0 +1,526 @@
+/* ==========================================================================
+   Watermark Studio -- design system
+
+   Flat 3.0, not neumorphism: hairline borders and one-pixel elevation carry
+   depth; nothing meaningful is expressed by a soft shadow. That choice is
+   deliberate. Classic neumorphic surfaces land around 1.1:1 contrast against
+   their background, well under the 3:1 WCAG minimum for non-text UI, which
+   means a verdict or a damage overlay rendered that way is unreadable on a
+   projector. Here every element that carries meaning -- verdicts, flagged
+   regions, unrecoverable blocks, disabled controls -- is high-contrast and
+   also distinguished by shape, icon, or pattern, never by colour alone.
+
+   Tokens are three layers: primitives (raw values) -> semantic (roles) ->
+   usage (components reference roles only). A component never names a raw
+   colour, which is what keeps light and dark from drifting apart.
+   ========================================================================== */
+
+/* --- layer 1: primitives -------------------------------------------------- */
+:root {
+  --gray-25:  #fcfcfd;
+  --gray-50:  #f7f8fa;
+  --gray-100: #f1f2f6;
+  --gray-200: #e4e7ec;
+  --gray-300: #d0d5dd;
+  --gray-400: #98a2b3;
+  --gray-500: #667085;
+  --gray-700: #344054;
+  --gray-900: #101828;
+  --ink-950:  #0b0d12;
+  --ink-900:  #12141b;
+  --ink-850:  #171a23;
+  --ink-800:  #1e222d;
+  --ink-700:  #2a2f3d;
+
+  --indigo-500: #6366f1;
+  --indigo-600: #4f46e5;
+  --indigo-700: #4338ca;
+  --indigo-300: #a5b4fc;
+
+  --green-600: #067647;
+  --amber-600: #b54708;
+  --red-600:   #d92d20;
+
+  /* type: one scale, no ad-hoc sizes anywhere below */
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-md: 0.9375rem;
+  --fs-lg: 1.0625rem;
+  --fs-xl: 1.375rem;
+  --fs-2xl: clamp(1.5rem, 1.2rem + 1.2vw, 2rem);
+
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 24px; --sp-6: 32px; --sp-7: 48px;
+
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-full: 999px;
+  --sidebar-w: 244px;
+}
+
+/* --- layer 2: semantic roles (light) -------------------------------------- */
+:root {
+  --bg:          var(--gray-50);
+  --surface:     #ffffff;
+  --surface-2:   var(--gray-50);
+  --surface-3:   var(--gray-100);
+  --border:      var(--gray-200);
+  --border-strong: var(--gray-300);
+  --text:        var(--gray-900);
+  --text-2:      var(--gray-700);
+  --text-muted:  var(--gray-500);
+  --accent:      var(--indigo-600);
+  --accent-hover: var(--indigo-700);
+  --accent-soft: #eef2ff;
+  --accent-text: #ffffff;
+  --ok:   var(--green-600);
+  --ok-bg: #ecfdf3;
+  --ok-solid: var(--green-600);
+  --warn: var(--amber-600);
+  --warn-bg: #fffaeb;
+  --bad:  var(--red-600);
+  --bad-bg: #fef3f2;
+  --bad-solid: var(--red-600);
+  --on-solid: #ffffff;
+  --focus: var(--indigo-500);
+  --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-2: 0 4px 14px rgba(16, 24, 40, 0.07);
+  --checker-a: #f1f2f6;
+  --checker-b: #e4e7ec;
+}
+
+/* Dark, defined twice so all three theme states resolve: system default (no
+   attribute) and the explicit toggle. Only roles are redefined -- never a
+   component rule -- so there is exactly one place to keep in sync. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:          var(--ink-950);
+    --surface:     var(--ink-900);
+    --surface-2:   var(--ink-850);
+    --surface-3:   var(--ink-800);
+    --border:      var(--ink-700);
+    --border-strong: #3a4152;
+    --text:        #e9eaee;
+    --text-2:      #c6cad4;
+    --text-muted:  #98a0b3;
+    --accent:      var(--indigo-500);
+    --accent-hover: var(--indigo-300);
+    --accent-soft: #1e1b4b;
+    --accent-text: #ffffff;
+    --ok:   #4ade80;
+    --ok-bg: #05261a;
+    --ok-solid: #15803d;
+    --warn: #fbbf24;
+    --warn-bg: #2a1d05;
+    --bad:  #fca5a5;
+    --bad-bg: #2d0f0d;
+    --bad-solid: #b42318;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-2: 0 4px 14px rgba(0, 0, 0, 0.45);
+    --checker-a: #1e222d;
+    --checker-b: #171a23;
+  }
+}
+:root[data-theme="dark"] {
+  --bg:          var(--ink-950);
+  --surface:     var(--ink-900);
+  --surface-2:   var(--ink-850);
+  --surface-3:   var(--ink-800);
+  --border:      var(--ink-700);
+  --border-strong: #3a4152;
+  --text:        #e9eaee;
+  --text-2:      #c6cad4;
+  --text-muted:  #98a0b3;
+  --accent:      var(--indigo-500);
+  --accent-hover: var(--indigo-300);
+  --accent-soft: #1e1b4b;
+  --accent-text: #ffffff;
+  --ok:   #4ade80;
+  --ok-bg: #05261a;
+  --ok-solid: #15803d;
+  --warn: #fbbf24;
+  --warn-bg: #2a1d05;
+  --bad:  #fca5a5;
+  --bad-bg: #2d0f0d;
+  --bad-solid: #b42318;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 4px 14px rgba(0, 0, 0, 0.45);
+  --checker-a: #1e222d;
+  --checker-b: #171a23;
+}
+
+/* --- layer 3: base -------------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* The `hidden` attribute is only a UA-stylesheet `display: none`, so ANY author
+   rule that sets display -- `.card { display: flex }`, `.drop-file { display:
+   flex }` -- silently outranks it and the element stays on screen. This bit the
+   app for real: result cards rendered empty on first load, and a failed
+   verification left the previous file's verdict visible underneath the error
+   message, which is the one thing a verification tool must never do. Every
+   `hidden` in the markup depends on this rule. */
+[hidden] { display: none !important; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system,
+               BlinkMacSystemFont, Inter, Roboto, system-ui, sans-serif;
+  font-size: var(--fs-md);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { margin: 0; font-weight: 620; letter-spacing: -0.012em; line-height: 1.25; }
+h1 { font-size: var(--fs-2xl); }
+h2 { font-size: var(--fs-lg); }
+p  { margin: 0; }
+a  { color: var(--accent); }
+
+code, .mono {
+  font-family: "Cascadia Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: var(--fs-xs);
+}
+
+:where(button, a, input, select, summary):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* --- shell ---------------------------------------------------------------- */
+.shell { display: flex; min-height: 100vh; }
+
+.sidebar {
+  position: sticky; top: 0; align-self: flex-start;
+  width: var(--sidebar-w); flex: 0 0 var(--sidebar-w);
+  height: 100vh; padding: var(--sp-5) var(--sp-4);
+  display: flex; flex-direction: column; gap: var(--sp-5);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+
+.brand { display: flex; align-items: center; gap: var(--sp-3); }
+.brand-glyph {
+  width: 34px; height: 34px; flex: 0 0 34px;
+  display: grid; place-items: center;
+  border-radius: var(--r-md);
+  background: var(--accent); color: var(--accent-text);
+}
+.brand-glyph svg { width: 20px; height: 20px; }
+.brand-text { display: flex; flex-direction: column; min-width: 0; }
+.brand-text strong { font-size: var(--fs-md); font-weight: 640; letter-spacing: -0.01em; }
+.brand-text small { font-size: var(--fs-xs); color: var(--text-muted); }
+
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav-item {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--text-2);
+  font: inherit; font-size: var(--fs-md); text-align: left;
+  cursor: pointer; transition: background 0.12s, color 0.12s;
+}
+.nav-item:hover { background: var(--surface-3); color: var(--text); }
+.nav-dot {
+  width: 6px; height: 6px; flex: 0 0 6px; border-radius: var(--r-full);
+  background: var(--border-strong); transition: background 0.12s, transform 0.12s;
+}
+/* Active nav is marked three ways at once -- filled background, heavier text, and
+   a solid accent dot -- so it survives greyscale printing and colour-blind
+   viewing, not just a colour swap. */
+.nav-item.is-active {
+  background: var(--accent-soft); color: var(--accent); font-weight: 600;
+}
+.nav-item.is-active .nav-dot { background: var(--accent); transform: scale(1.35); }
+.nav-count {
+  margin-left: auto; padding: 1px 7px; border-radius: var(--r-full);
+  background: var(--surface-3); color: var(--text-muted); font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.nav-item.is-active .nav-count { background: var(--accent); color: var(--accent-text); }
+
+.sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: var(--sp-3); }
+.fine { font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.5; }
+
+.main { flex: 1 1 auto; min-width: 0; padding: var(--sp-6) var(--sp-6) var(--sp-7); }
+.view { display: none; max-width: 940px; margin: 0 auto; }
+.view.is-active { display: flex; flex-direction: column; gap: var(--sp-4); }
+
+.page-head { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-1); }
+.page-head p { color: var(--text-muted); max-width: 68ch; }
+
+/* --- card ----------------------------------------------------------------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: var(--sp-5);
+  display: flex; flex-direction: column; gap: var(--sp-4);
+  box-shadow: var(--shadow-1);
+}
+.card-head { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.card-head h2 { display: flex; align-items: center; gap: var(--sp-3); }
+.num {
+  width: 24px; height: 24px; flex: 0 0 24px;
+  display: grid; place-items: center;
+  border-radius: var(--r-full);
+  background: var(--accent-soft); color: var(--accent);
+  font-size: var(--fs-xs); font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.lead { color: var(--text-muted); max-width: 72ch; }
+
+/* --- controls ------------------------------------------------------------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2);
+  padding: 9px var(--sp-4); min-height: 38px;
+  border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--text);
+  font: inherit; font-size: var(--fs-md); font-weight: 550;
+  text-decoration: none; cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, transform 0.06s;
+}
+.btn:hover:not(:disabled) { background: var(--surface-3); border-color: var(--text-muted); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn-primary {
+  background: var(--accent); border-color: var(--accent); color: var(--accent-text);
+}
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-ghost { background: transparent; border-color: var(--border); color: var(--text-2); }
+.btn-danger { background: transparent; border-color: var(--border); color: var(--bad); }
+.btn-danger:hover:not(:disabled) { background: var(--bad-bg); border-color: var(--bad); }
+.btn-sm { min-height: 32px; padding: 5px var(--sp-3); font-size: var(--fs-sm); }
+/* Disabled is signalled by opacity AND desaturation AND cursor -- three cues, so
+   it never depends on noticing a subtle colour change. */
+.btn:disabled, .btn[aria-disabled="true"] {
+  opacity: 0.45; filter: grayscale(1); cursor: not-allowed;
+}
+
+.actions { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+
+.seg {
+  display: inline-flex; padding: 3px; gap: 2px;
+  background: var(--surface-3); border-radius: var(--r-sm);
+  align-self: flex-start;
+}
+.seg-btn {
+  padding: 6px var(--sp-4); border: 0; border-radius: 4px;
+  background: transparent; color: var(--text-muted);
+  font: inherit; font-size: var(--fs-sm); font-weight: 550; cursor: pointer;
+}
+.seg-btn.is-active {
+  background: var(--surface); color: var(--text); box-shadow: var(--shadow-1);
+}
+
+.src-pane { display: none; flex-direction: column; gap: var(--sp-2); }
+.src-pane.is-active { display: flex; }
+
+.grid { display: grid; gap: var(--sp-3); }
+.grid-2 { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.grid-4 { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.field { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.lbl { font-size: var(--fs-sm); font-weight: 550; color: var(--text-2); }
+
+input[type="text"], input[type="number"], select {
+  width: 100%; padding: 8px var(--sp-3); min-height: 38px;
+  border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--text);
+  font: inherit; font-size: var(--fs-md);
+}
+input:hover, select:hover { border-color: var(--text-muted); }
+
+.adv { border-top: 1px solid var(--border); padding-top: var(--sp-3); }
+.adv > summary {
+  cursor: pointer; font-size: var(--fs-sm); font-weight: 550; color: var(--text-2);
+  list-style: none; display: flex; align-items: center; gap: var(--sp-2);
+}
+.adv > summary::-webkit-details-marker { display: none; }
+.adv > summary::before {
+  content: "\203A"; display: inline-block; transition: transform 0.15s;
+  font-size: var(--fs-lg); line-height: 1; color: var(--text-muted);
+}
+.adv[open] > summary::before { transform: rotate(90deg); }
+.adv > *:not(summary) { margin-top: var(--sp-3); }
+
+.switch { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm);
+          color: var(--text-2); cursor: pointer; }
+.switch input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+
+.btn-row { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+
+/* --- dropzone ------------------------------------------------------------- */
+.drop {
+  display: flex; flex-direction: column; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-6) var(--sp-4);
+  border: 1.5px dashed var(--border-strong); border-radius: var(--r-md);
+  background: var(--surface-2); cursor: pointer; text-align: center;
+  transition: border-color 0.12s, background 0.12s;
+}
+.drop:hover, .drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.drop-glyph { color: var(--accent); }
+.drop-glyph svg { width: 26px; height: 26px; }
+.drop-main { font-weight: 550; }
+.drop-sub { font-size: var(--fs-xs); color: var(--text-muted); }
+.drop-file {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--surface-2); font-size: var(--fs-sm); color: var(--text-2);
+}
+.drop-file strong { color: var(--text); overflow-wrap: anywhere; }
+
+/* --- status / banners ----------------------------------------------------- */
+.status { font-size: var(--fs-sm); color: var(--text-muted); display: inline-flex;
+          align-items: center; gap: var(--sp-2); }
+.status.err { color: var(--bad); font-weight: 550; }
+.spinner {
+  width: 13px; height: 13px; flex: 0 0 13px; border-radius: 50%;
+  border: 2px solid var(--border-strong); border-top-color: var(--accent);
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+
+/* A verdict is the single most important thing on the page: solid fill, an icon
+   as well as words, and the same treatment in both themes. Never shadow-only. */
+.banner {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md);
+  font-weight: 620; font-size: var(--fs-lg); letter-spacing: -0.01em;
+  border: 1px solid transparent;
+}
+.banner-icon { font-size: 1.15em; line-height: 1; }
+.banner.tampered { background: var(--bad-solid); border-color: var(--bad-solid); color: var(--on-solid); }
+.banner.authentic { background: var(--ok-solid); border-color: var(--ok-solid); color: var(--on-solid); }
+.warn-note {
+  padding: var(--sp-3); border-radius: var(--r-sm);
+  border: 1px solid var(--warn); background: var(--warn-bg); color: var(--warn);
+  font-size: var(--fs-sm);
+}
+
+.badge {
+  padding: 2px var(--sp-2); border-radius: var(--r-full);
+  font-size: var(--fs-xs); font-weight: 620; border: 1px solid;
+}
+.badge-ok   { color: var(--ok); background: var(--ok-bg); border-color: var(--ok); }
+.badge-warn { color: var(--warn); background: var(--warn-bg); border-color: var(--warn); }
+.badge-bad  { color: var(--bad); background: var(--bad-bg); border-color: var(--bad); }
+.badge.AUTHENTIC { color: var(--ok); background: var(--ok-bg); border-color: var(--ok); }
+.badge.RECOVERABLE { color: var(--warn); background: var(--warn-bg); border-color: var(--warn); }
+.badge.UNRECOVERABLE, .badge.FLAGGED_BY_REFINEMENT {
+  color: var(--bad); background: var(--bad-bg); border-color: var(--bad);
+}
+
+/* --- stats ---------------------------------------------------------------- */
+.stats { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.stat {
+  padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--surface-2); display: flex; flex-direction: column; gap: 2px;
+}
+.stat-k { font-size: var(--fs-xs); font-weight: 600; color: var(--text-muted);
+          text-transform: uppercase; letter-spacing: 0.05em; }
+.stat-v { font-size: var(--fs-xl); font-weight: 640; letter-spacing: -0.02em;
+          font-variant-numeric: tabular-nums; }
+.stat-x { font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.45; }
+
+/* --- images --------------------------------------------------------------- */
+.compare { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+/* Same max width as .frame below, so the damaged, detected and repaired views of
+   the same image stay exactly the same size as you scroll between them -- a
+   40px jump between them reads as a different crop rather than the same picture. */
+.compare.one { grid-template-columns: minmax(0, 560px); }
+.compare figure { margin: 0; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.compare img, .frame img {
+  display: block; width: 100%; height: auto; border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  /* Checkerboard shows through only where an image has alpha -- it also makes a
+     failed image load obvious instead of looking like a blank card. */
+  background-image: linear-gradient(45deg, var(--checker-b) 25%, transparent 25%, transparent 75%, var(--checker-b) 75%),
+                    linear-gradient(45deg, var(--checker-b) 25%, transparent 25%, transparent 75%, var(--checker-b) 75%);
+  background-size: 16px 16px; background-position: 0 0, 8px 8px;
+  background-color: var(--checker-a);
+}
+.compare figcaption, .cap { font-size: var(--fs-sm); color: var(--text-muted); }
+.frame { max-width: 560px; }
+
+.tabs { display: flex; gap: 2px; padding: 3px; background: var(--surface-3);
+        border-radius: var(--r-sm); align-self: flex-start; flex-wrap: wrap; }
+.tab {
+  padding: 5px var(--sp-3); border: 0; border-radius: 4px;
+  background: transparent; color: var(--text-muted);
+  font: inherit; font-size: var(--fs-sm); font-weight: 550; cursor: pointer;
+}
+.tab.is-active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-1); }
+
+/* --- match card ----------------------------------------------------------- */
+.match {
+  display: grid; gap: var(--sp-4); align-items: start;
+  grid-template-columns: 88px minmax(0, 1fr);
+  padding: var(--sp-4); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-md); background: var(--surface-2);
+}
+.match img { width: 88px; height: auto; border-radius: var(--r-sm); border: 1px solid var(--border); }
+.match-body { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.match-title { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+               font-weight: 620; font-size: var(--fs-lg); }
+
+.kv { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.kv td { padding: 6px var(--sp-2); border-top: 1px solid var(--border); vertical-align: top; }
+.kv tr:first-child td { border-top: 0; }
+.kv td:first-child { color: var(--text-muted); white-space: nowrap; width: 1%; padding-left: 0; }
+.kv code { overflow-wrap: anywhere; }
+
+/* --- library -------------------------------------------------------------- */
+.lib-grid { display: grid; gap: var(--sp-4); grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.lib-card {
+  display: flex; flex-direction: column; gap: var(--sp-3);
+  padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--surface); box-shadow: var(--shadow-1);
+}
+.lib-card img { width: 100%; height: 132px; object-fit: cover; border-radius: var(--r-sm);
+                border: 1px solid var(--border); background: var(--surface-3); }
+.lib-name { font-weight: 600; overflow-wrap: anywhere; }
+.lib-meta { font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.6; }
+.lib-actions { display: flex; gap: var(--sp-2); margin-top: auto; flex-wrap: wrap; }
+.empty {
+  padding: var(--sp-7) var(--sp-4); text-align: center; color: var(--text-muted);
+  border: 1.5px dashed var(--border-strong); border-radius: var(--r-lg);
+}
+
+/* --- about ---------------------------------------------------------------- */
+.steps { display: grid; gap: var(--sp-4); grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.step { gap: var(--sp-2); }
+.step-n { font-size: var(--fs-xs); font-weight: 700; color: var(--accent);
+          letter-spacing: 0.1em; }
+.step p, .limits { color: var(--text-muted); }
+.limits { margin: 0; padding-left: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-2); }
+.limits strong { color: var(--text); }
+
+/* --- responsive ----------------------------------------------------------- */
+@media (max-width: 860px) {
+  .shell { flex-direction: column; }
+  .sidebar {
+    position: static; width: auto; flex: none; height: auto;
+    border-right: 0; border-bottom: 1px solid var(--border);
+    padding: var(--sp-3) var(--sp-4); gap: var(--sp-3);
+    /* align-self: stretch is load-bearing, not tidying. The desktop rule sets
+       align-self: flex-start (to stop the sticky rail stretching to page height);
+       once .shell flips to a column here, that same declaration governs the
+       HORIZONTAL axis instead, so the rail sized itself to its widest child and
+       spilled to 604px inside a 390px viewport, scrolling the whole page sideways.
+       The tell was .brand and .sidebar-foot both measuring 572px -- content width,
+       not viewport width. min-width: 0 then lets .nav's overflow-x actually engage
+       instead of forcing the rail wide again from the inside. */
+    align-self: stretch; min-width: 0;
+  }
+  .nav { flex-direction: row; overflow-x: auto; gap: var(--sp-2); padding-bottom: 2px;
+         min-width: 0; }
+  .nav-item { white-space: nowrap; flex: 0 0 auto; }
+  .nav-dot { display: none; }
+  .sidebar-foot { margin-top: 0; flex-direction: row; align-items: center; gap: var(--sp-4); }
+  .sidebar-foot .fine { display: none; }
+  .main { padding: var(--sp-4) var(--sp-4) var(--sp-6); }
+  .match { grid-template-columns: minmax(0, 1fr); }
+  .match img { width: 120px; }
+}
