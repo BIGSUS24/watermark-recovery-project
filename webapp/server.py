@@ -279,13 +279,29 @@ def index():
 @app.route("/api/samples")
 @guarded
 def api_samples():
+    # Only offer samples whose file is actually on disk. manifest.csv is committed to
+    # the repository but the 21 MB of third-party corpus images are not, so on a fresh
+    # clone this listed 32 photographs that did not exist -- and the very first thing a
+    # new user does (leave "Sample image" selected, press Protect) failed with a raw
+    # filesystem path. Reporting an empty list plus a hint is the honest answer.
     rows = load_manifest()
-    samples = [
-        {"dataset": r["dataset"], "filename": r["filename"], "relpath": r["relpath"],
-         "width": int(r["width"]), "height": int(r["height"])}
-        for r in rows
-    ]
-    return ok(samples=samples)
+    samples, missing = [], 0
+    for r in rows:
+        if not (SAMPLES_DIR / r["relpath"]).exists():
+            missing += 1
+            continue
+        samples.append(
+            {"dataset": r["dataset"], "filename": r["filename"], "relpath": r["relpath"],
+             "width": int(r["width"]), "height": int(r["height"])})
+    resp = {"samples": samples, "missing": missing, "total": len(rows)}
+    if not samples:
+        resp["hint"] = ("The sample corpus has not been downloaded yet. Run "
+                        "'python samples/fetch_corpus.py' to fetch it, or just upload "
+                        "your own PNG instead -- everything works either way.")
+    elif missing:
+        resp["hint"] = (f"{missing} of {len(rows)} corpus images are missing from disk; "
+                        "run 'python samples/fetch_corpus.py' to complete the set.")
+    return ok(**resp)
 
 
 @app.route("/api/protect", methods=["POST"])

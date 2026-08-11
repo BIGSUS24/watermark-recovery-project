@@ -169,30 +169,52 @@ function renderTabs(stripId, imgId, capId, tabs) {
    PROTECT
    =========================================================================== */
 
-async function loadSamples() {
-  const sel = $("sample-select");
-  try {
-    const { samples } = await api("/api/samples");
-    sel.innerHTML = samples.map((s) =>
-      `<option value="${esc(s.relpath)}">${esc(s.dataset)} / ${esc(s.filename)} ` +
-      `(${s.width}×${s.height})</option>`).join("");
-    const lena = samples.findIndex((s) => s.filename.toLowerCase().includes("lena"));
-    if (lena >= 0) sel.selectedIndex = lena;
-  } catch {
-    sel.innerHTML = "<option>Could not load the sample list</option>";
-  }
-}
-
-document.querySelectorAll(".seg-btn").forEach((btn) => btn.addEventListener("click", () => {
-  state.protectSource = btn.dataset.src;
+// Switch the Protect page between its two source panes. Called by the segmented
+// control and also on load, when an absent corpus forces the Upload pane.
+function selectSource(which) {
+  state.protectSource = which;
   document.querySelectorAll(".seg-btn").forEach((b) => {
-    const on = b === btn;
+    const on = b.dataset.src === which;
     b.classList.toggle("is-active", on);
     b.setAttribute("aria-selected", String(on));
   });
-  $("src-sample").classList.toggle("is-active", state.protectSource === "sample");
-  $("src-upload").classList.toggle("is-active", state.protectSource === "upload");
-}));
+  $("src-sample").classList.toggle("is-active", which === "sample");
+  $("src-upload").classList.toggle("is-active", which === "upload");
+}
+
+async function loadSamples() {
+  const sel = $("sample-select");
+  const note = $("sample-note");
+  try {
+    const d = await api("/api/samples");
+    sel.innerHTML = d.samples.map((s) =>
+      `<option value="${esc(s.relpath)}">${esc(s.dataset)} / ${esc(s.filename)} ` +
+      `(${s.width}×${s.height})</option>`).join("");
+    const lena = d.samples.findIndex((s) => s.filename.toLowerCase().includes("lena"));
+    if (lena >= 0) sel.selectedIndex = lena;
+
+    note.hidden = !d.hint;
+    if (d.hint) note.innerHTML = esc(d.hint).replace(/'([^']+)'/g, "<code>$1</code>");
+
+    // With no corpus on disk, the sample pane is a dead end: default to Upload and
+    // disable the empty picker rather than let the first click fail.
+    if (!d.samples.length) {
+      sel.innerHTML = '<option value="">No sample images downloaded</option>';
+      sel.disabled = true;
+      document.querySelector('.seg-btn[data-src="sample"]').disabled = true;
+      selectSource("upload");
+    }
+  } catch (e) {
+    sel.innerHTML = "<option value=\"\">Could not load the sample list</option>";
+    sel.disabled = true;
+    note.hidden = false;
+    note.textContent = e.message;
+    selectSource("upload");
+  }
+}
+
+document.querySelectorAll(".seg-btn").forEach((btn) =>
+  btn.addEventListener("click", () => selectSource(btn.dataset.src)));
 
 wireDrop("protect-drop", "upload-input", "protect-file", (f) => { state.protectFile = f; });
 
