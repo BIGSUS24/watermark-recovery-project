@@ -29,11 +29,104 @@ KEY_LABEL_TAG = b"wgtlr/v1/tag"
 KEY_LABEL_MAP = b"wgtlr/v1/map"
 
 # Format magic + variant codes for the tag message header (see block_tags).
-VARIANT_CODE = {"A": 1, "B": 2}
+VARIANT_CODE = {"A": 1, "B": 2, "C": 3}
 
 # JPEG-50 luminance quantization table read in zig-zag order, DC entry replaced by 8.
 DELTA_ZZ = np.array([8, 11, 12, 14, 12, 10, 16, 14, 13, 14, 18, 17, 16, 19, 24, 40],
                     dtype=np.float64)
+
+# --------------------------------------------------------------------------
+# Variant C tables -- rate-distortion-optimized descriptor (block=8 only)
+# --------------------------------------------------------------------------
+# WHY C EXISTS. Variant A spends its 96 descriptor bits as 12 zig-zag DCT
+# coefficients at a FIXED 8 bits each. Measured on a scanned-document photo,
+# reconstructing the whole image from intact descriptors with zero tampering
+# tops out at 23.86 dB -- and real measured recovery of a pen-scribbled region
+# came in at 23.0 dB, i.e. 96% of that ceiling. The tamper mapping was not the
+# bottleneck; the descriptor was. Twelve of 64 coefficients is a severe
+# low-pass filter, and text is broadband, so document content is the worst
+# case for A by construction.
+#
+# A's own no-clipping proof is what exposes the waste: it shows every AC
+# coefficient uses at most 1024/10 = 102.4 of int8's +-127 range. That slack is
+# paid for in every block and never used. C reallocates it: coefficient COUNT,
+# not coefficient PRECISION, is what document content is starved of.
+#
+# THE LAYOUT. 96 bits = 1 mode bit + 95 bits of coefficient fields.
+#   bit 0        : which table this block used (0 = smooth, 1 = detailed)
+#   bits 1..95   : signed two's-complement fields, MSB-first, in zig-zag
+#                  order, of the per-position widths in C_BITS[mode].
+# The encoder reconstructs the block BOTH ways and keeps whichever is actually
+# closer in pixel space, so mode selection is exact rather than heuristic.
+# One bit of side information buys about a dB of mean fidelity over a single
+# table and -- the reason it ships -- turns a worst case into a guarantee. A
+# single table regressed one smooth low-detail corpus image (tiffany) by 1.92 dB;
+# the dual table regresses nothing. Measured on 13 held-out corpus images the fit
+# never saw, plus the synthetic document: mean +3.19 dB over variant A, worst case
+# +2.33 dB, i.e. EVERY image improves. That "never worse" property, not the mean,
+# is what makes C safe to default to; src/fit_variant_c.py asserts it.
+#
+# The mode bit needs no extra protection: it lives in the descriptor field,
+# and block_tags() already binds every carried descriptor bit into the HMAC.
+#
+# UNLIKE VARIANT A, SATURATION IS DELIBERATE HERE. A 2-bit AC field holds only
+# -2..1, so real content clips -- and that is the optimum, not a defect: the
+# step sizes below were chosen by measuring true squared error INCLUDING
+# saturation and picking the minimum, so trading rare large-coefficient
+# clipping for finer everyday resolution is a decision the numbers made. C
+# therefore REPORTS its saturation count instead of asserting it is zero. Do
+# not copy A's `assert n_clipped == 0` onto this variant.
+#
+# PROVENANCE / REPRODUCIBILITY: both tables are the output of
+# `python src/fit_variant_c.py`, which re-derives them from the corpus and
+# asserts they match these literals exactly. They are NOT hand-tuned, and they
+# are NOT fitted per image -- one fixed table pair, baked into the format, the
+# way JPEG bakes in its quantization tables. Training set: the 8x8 DCT
+# statistics of one high-frequency near-greyscale document scan plus the first
+# three corpus photographs. That mix is load-bearing. Fitting on the document
+# alone starves chroma and cost a saturated-colour image 7.3 dB; fitting on
+# photographs alone leaves document text blurred.
+C_DESC_BITS = 96          # variant C is defined for block=8 / 96 descriptor bits only
+C_MODE_BITS = 1
+
+# Bits per zig-zag position. Each row sums to exactly 95.
+C_BITS = (
+    # mode 0 -- smooth blocks: 34 coefficients, fine DC (8 bits)
+    (8, 4, 5, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 3, 2, 2, 2,
+     2, 2, 2, 2, 0, 0, 1, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+    # mode 1 -- detailed blocks: 31 coefficients, coarser DC, much wider AC steps
+    (7, 5, 5, 4, 4, 5, 5, 4, 3, 4, 3, 3, 3, 3, 4, 3, 2, 2, 2, 2, 3, 2, 2, 2,
+     2, 2, 2, 2, 1, 0, 0, 0, 2, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+)
+
+# Quantization step per zig-zag position, 0 where that position carries no bits.
+# A width of 1 is legal and appears in both tables: a 1-bit signed field encodes
+# {-1, 0}, which the allocator measured as worth more than nothing at a position
+# where 2 bits would have to come out of somewhere better.
+C_STEPS = (
+    (7.6187, 9.9764, 6.39, 7.404, 6.8901, 7.6729, 9.6646, 8.7721, 8.6625,
+     10.2742, 8.1416, 6.6205, 6.8937, 6.4824, 7.4243, 6.6982, 7.5421, 8.5813,
+     8.2487, 8.7058, 7.4378, 7.7674, 7.4551, 6.7384, 6.8971, 6.6603, 6.1293,
+     6.5289, 0.0, 0.0, 6.1632, 5.584, 5.6883, 5.6441, 6.4359, 5.7916, 0.0,
+     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    (12.7222, 35.0876, 33.5106, 35.8346, 28.7572, 29.0145, 22.6791, 22.7167,
+     29.9529, 26.5759, 35.6076, 24.2035, 24.4592, 30.5164, 28.4422, 29.3887,
+     35.5397, 29.8628, 30.1685, 36.7847, 27.8788, 28.8257, 26.8867, 26.9329,
+     24.5621, 23.0053, 22.4481, 29.2487, 24.9814, 0.0, 0.0, 0.0, 22.9585, 0.0,
+     0.0, 22.2559, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+     0.0, 0.0, 0.0),
+)
+
+assert len(C_BITS) == len(C_STEPS) == 2
+for _m in (0, 1):
+    assert len(C_BITS[_m]) == len(C_STEPS[_m]) == 64
+    assert sum(C_BITS[_m]) + C_MODE_BITS == C_DESC_BITS, sum(C_BITS[_m])
+    # A position with bits must have a step, and a position without bits must not.
+    assert all((w > 0) == (s > 0) for w, s in zip(C_BITS[_m], C_STEPS[_m]))
 
 
 # --------------------------------------------------------------------------
@@ -260,6 +353,78 @@ def zigzag_indices(block: int) -> list[tuple[int, int]]:
 # Recovery descriptors
 # --------------------------------------------------------------------------
 
+def _c_check(block: int, desc_bits: int) -> None:
+    """Variant C is a block=8 format. Fail loudly rather than mis-pack."""
+    if block != 8 or desc_bits != C_DESC_BITS:
+        raise ValueError(
+            f"variant C is defined for block=8 / {C_DESC_BITS} descriptor bits only, "
+            f"got block={block} / desc_bits={desc_bits}. Use variant A or B for other "
+            f"block sizes (the block=4 ablation runs on A), or regenerate a table pair "
+            f"for that width with src/fit_variant_c.py.")
+
+
+def _c_quantize(coef: np.ndarray, mode: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(K,64) coefficients -> (codes, dequantized, per-block saturation count) for one mode."""
+    bits, steps = C_BITS[mode], C_STEPS[mode]
+    q = np.zeros(coef.shape, dtype=np.int64)
+    deq = np.zeros(coef.shape, dtype=np.float64)
+    nsat = np.zeros(coef.shape[0], dtype=np.int32)
+    for i, w in enumerate(bits):
+        if not w:
+            continue
+        lo, hi = -(1 << (w - 1)), (1 << (w - 1)) - 1
+        # np.rint (round-half-to-even) for the same reason variant A uses it:
+        # int() truncation biases every coefficient toward zero.
+        raw = np.rint(coef[:, i] / steps[i])
+        nsat += ((raw < lo) | (raw > hi)).astype(np.int32)
+        q[:, i] = np.clip(raw, lo, hi)
+        deq[:, i] = q[:, i] * steps[i]
+    return q, deq, nsat
+
+
+def _c_idct(deq: np.ndarray, block: int) -> np.ndarray:
+    """(K,64) zig-zag dequantized coefficients -> (K,B,B) uint8 reconstruction, LSBs zeroed."""
+    zz = zigzag_indices(block)
+    Cz = np.zeros((deq.shape[0], block, block), dtype=np.float64)
+    Cz[:, [r for r, _ in zz], [c for _, c in zz]] = deq
+    D = dct_matrix(block)
+    return np.clip(np.rint(D.T @ Cz @ D + 128.0), 0, 255).astype(np.uint8) & np.uint8(0xFC)
+
+
+def _c_pack(q: np.ndarray, mode: int) -> np.ndarray:
+    """(K,64) codes -> (K,96) bit array: mode bit, then MSB-first two's-complement fields."""
+    out = np.zeros((q.shape[0], C_DESC_BITS), dtype=np.uint8)
+    out[:, 0] = mode
+    off = C_MODE_BITS
+    for i, w in enumerate(C_BITS[mode]):
+        if not w:
+            continue
+        # & mask turns the signed code into its w-bit two's-complement pattern; the
+        # decoder's sign-extension below is the exact inverse. Same free round-trip
+        # variant A gets from int8's byte view, just at an arbitrary width.
+        u = q[:, i] & ((1 << w) - 1)
+        out[:, off:off + w] = (u[:, None] >> np.arange(w - 1, -1, -1)[None, :]) & 1
+        off += w
+    assert off == C_DESC_BITS, off
+    return out
+
+
+def _c_unpack(desc: np.ndarray, mode: int) -> np.ndarray:
+    """(K,96) bits -> (K,64) dequantized coefficients, decoding with one mode's table."""
+    deq = np.zeros((desc.shape[0], 64), dtype=np.float64)
+    off = C_MODE_BITS
+    for i, w in enumerate(C_BITS[mode]):
+        if not w:
+            continue
+        u = desc[:, off:off + w].astype(np.int64) @ (1 << np.arange(w - 1, -1, -1))
+        # Sign-extend: anything at or above half the range is negative.
+        q = u - ((u >= (1 << (w - 1))) << w)
+        deq[:, i] = q * C_STEPS[mode][i]
+        off += w
+    assert off == C_DESC_BITS, off
+    return deq
+
+
 def encode_descriptor(blocks_msb: np.ndarray, variant: str, desc_bits: int
                       ) -> tuple[np.ndarray, int]:
     """(K, desc_bits) uint8 bit array compressing each MSB-projected block; also n_clipped.
@@ -344,6 +509,37 @@ def encode_descriptor(blocks_msb: np.ndarray, variant: str, desc_bits: int
         # evenly) -- add a variant-B2 layout only if that combination is
         # ever actually required.
 
+    if variant == "C":
+        _c_check(B, desc_bits)
+        X = blocks_msb.astype(np.float64) - 128.0
+        D = dct_matrix(B)
+        zz = zigzag_indices(B)
+        coef = (D @ X @ D.T)[:, [r for r, _ in zz], [c for _, c in zz]]  # (K, 64)
+
+        # Mode decision measured in PIXEL space, not coefficient space. The
+        # reconstruction path ends in rint -> clip(0,255) -> & 0xFC, and none of
+        # those three are linear, so coefficient-domain error is only a proxy.
+        # Reconstructing both ways and comparing against the actual target block
+        # costs one extra vectorized IDCT over the stack and makes the choice
+        # exactly optimal instead of nearly optimal.
+        target = blocks_msb.astype(np.int32)
+        cand = []
+        for mode in (0, 1):
+            q, deq, nsat = _c_quantize(coef, mode)
+            recon = _c_idct(deq, B)
+            err = ((recon.astype(np.int32) - target) ** 2).sum(axis=(1, 2))
+            cand.append((q, nsat, err))
+        chosen = np.argmin(np.stack([c[2] for c in cand]), axis=0)  # (K,) 0 or 1
+
+        # Pack both ways and select rows. Two (K, 96) uint8 arrays is under a
+        # megabyte at K=4096 -- cheaper than the index gymnastics of packing
+        # each mode's subset in place.
+        bits = np.where(chosen[:, None] == 1, _c_pack(cand[1][0], 1),
+                        _c_pack(cand[0][0], 0))
+        n_sat = int(np.take_along_axis(
+            np.stack([c[1] for c in cand]), chosen[None, :], axis=0).sum())
+        return bits, n_sat
+
     raise ValueError(f"unknown variant {variant!r}")
 
 
@@ -384,6 +580,15 @@ def decode_descriptor(desc: np.ndarray, variant: str, block: int) -> np.ndarray:
         recon = np.repeat(np.repeat(recon_mu, 2, axis=1), 2, axis=2)
         recon = np.clip(recon, 0, 255).astype(np.uint8)
         return recon & 0xFC
+
+    if variant == "C":
+        _c_check(B, desc_bits)
+        mode = desc[:, 0]
+        # Decode under both tables and select, rather than branching per block:
+        # the table a block used is data, so a Python loop over K would be the
+        # only alternative, and K is 4096-16384 per channel.
+        both = np.stack([_c_idct(_c_unpack(desc, m), B) for m in (0, 1)])
+        return np.where(mode[:, None, None] == 1, both[1], both[0])
 
     raise ValueError(f"unknown variant {variant!r}")
 
@@ -483,6 +688,70 @@ if __name__ == "__main__":
             if variant == "B":
                 assert np.array_equal(encode_descriptor(r, "B", db)[0], d)
 
+    # ---------------- variant C ----------------
+    # The bit-level round-trip is the assertion that matters most here. Variant A
+    # gets its sign handling free from int8's byte view; C packs 33-34 fields of
+    # 2-8 bits each by hand, so a single off-by-one in an offset or a botched
+    # sign-extension would corrupt every recovered block while still producing
+    # plausible-looking output. Every field is therefore exercised at BOTH ends of
+    # its signed range and at zero, not at random values.
+    for mode in (0, 1):
+        widths = C_BITS[mode]
+        # Four rows per field: most-negative, -1, 0, most-positive.
+        q = np.zeros((4, 64), dtype=np.int64)
+        for i, w in enumerate(widths):
+            if not w:
+                continue
+            q[:, i] = [-(1 << (w - 1)), -1, 0, (1 << (w - 1)) - 1]
+        packed = _c_pack(q, mode)
+        assert packed.shape == (4, C_DESC_BITS)
+        assert set(np.unique(packed)) <= {0, 1}
+        assert np.all(packed[:, 0] == mode)                     # mode bit written
+        back = _c_unpack(packed, mode)
+        for i, w in enumerate(widths):
+            expect = q[:, i] * (C_STEPS[mode][i] if w else 0.0)
+            assert np.allclose(back[:, i], expect), (mode, i, w, back[:, i], expect)
+    print("payload.py: variant C bit packing round-trips at every field's signed extremes")
+
+    capC, tbC, dbC = budget(8)
+    blkC = np.concatenate([
+        msb(rng.integers(0, 256, (60, 8, 8), dtype=np.uint8)),      # detailed
+        np.zeros((1, 8, 8), dtype=np.uint8),                        # all black
+        np.full((1, 8, 8), 252, dtype=np.uint8),                    # all white
+        msb(np.full((1, 8, 8), 128, dtype=np.uint8)),               # flat mid-grey
+        msb(np.repeat(np.linspace(0, 255, 8, dtype=np.uint8)[None, :], 8, 0)[None]),  # ramp
+    ])
+    dC, nsatC = encode_descriptor(blkC, "C", dbC)
+    assert dC.shape == (blkC.shape[0], 96) and set(np.unique(dC)) <= {0, 1}
+    rC = decode_descriptor(dC, "C", 8)
+    assert rC.shape == blkC.shape and np.all(rC & 0x03 == 0)
+    # Saturation is EXPECTED and optimal for C (see the C_BITS commentary) -- the
+    # check is that it is reported as a number, not that it is zero.
+    assert isinstance(nsatC, int) and nsatC >= 0
+    # Both tables must actually get used across a mixed stack; if the mode
+    # decision were stuck, C would silently degrade to a single-table variant and
+    # every measured gain in the commentary above would be wrong.
+    assert set(np.unique(dC[:, 0])) == {0, 1}, "mode decision is stuck on one table"
+    # The whole point of C: it must beat A on the same blocks. Flat blocks are a
+    # tie by construction, so compare on the detailed ones.
+    dA, _ = encode_descriptor(blkC, "A", dbC)
+    rA = decode_descriptor(dA, "A", 8)
+    seA = ((rA[:60].astype(np.int32) - blkC[:60].astype(np.int32)) ** 2).mean()
+    seC = ((rC[:60].astype(np.int32) - blkC[:60].astype(np.int32)) ** 2).mean()
+    assert seC < seA, (seC, seA)
+    print(f"payload.py: variant C beats A on the same blocks "
+          f"(MSE {seC:.1f} vs {seA:.1f}), saturations={nsatC}, "
+          f"modes used={sorted(set(np.unique(dC[:, 0]).tolist()))}")
+
+    # C is a block=8 format and must refuse other widths loudly, not mis-pack.
+    for bad_block, bad_bits in ((4, 16), (8, 64)):
+        try:
+            encode_descriptor(msb(rng.integers(0, 256, (2, bad_block, bad_block),
+                                               dtype=np.uint8)), "C", bad_bits)
+            raise SystemExit(f"expected ValueError for variant C at block={bad_block}")
+        except ValueError:
+            pass
+
     # tag: five separate one-bit-change sensitivity asserts, plus LSB-blindness
     KEY = b"key-one"
     KEY2 = b"key-two"
@@ -492,6 +761,7 @@ if __name__ == "__main__":
     assert not np.array_equal(t0, block_tags(blk8, KEY, b"IE", (64, 64), 8, 0, "A", 32))   # ID binding
     assert not np.array_equal(t0, block_tags(blk8, KEY, b"ID", (64, 64), 8, 1, "A", 32))   # channel binding
     assert not np.array_equal(t0, block_tags(blk8, KEY, b"ID", (64, 64), 8, 0, "B", 32))   # variant binding
+    assert not np.array_equal(t0, block_tags(blk8, KEY, b"ID", (64, 64), 8, 0, "C", 32))   # ... incl. C
     assert not np.array_equal(t0, block_tags(blk8, KEY2, b"ID", (64, 64), 8, 0, "A", 32))  # key binding
     blk2 = blk8.copy()
     blk2[0, 0, 0] ^= 0x04  # flip an MSB-plane bit

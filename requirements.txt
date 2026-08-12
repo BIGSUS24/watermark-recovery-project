@@ -13,3 +13,4 @@ pillow==10.4.0
 streamlit==1.61.1
 matplotlib==3.11.1
 python-pptx==1.0.2
+pypdfium2==5.12.1  # optional -- only needed by imageio_any.py's PDF input path

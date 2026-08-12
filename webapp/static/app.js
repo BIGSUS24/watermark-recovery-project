@@ -218,12 +218,31 @@ document.querySelectorAll(".seg-btn").forEach((btn) =>
 
 wireDrop("protect-drop", "upload-input", "protect-file", (f) => { state.protectFile = f; });
 
+// Variant C only exists at block size 8 (src/payload.py's C_DESC_BITS table is defined
+// only at that width) -- the server 400s the combination, but disabling the option here
+// means the mismatch can never be sent in the first place.
+function syncVariantForBlock() {
+  const block = parseInt($("block-select").value, 10);
+  const variantSel = $("variant-select");
+  const cOpt = variantSel.querySelector('option[value="C"]');
+  if (block !== 8) {
+    if (variantSel.value === "C") variantSel.value = "A";
+    cOpt.disabled = true;
+  } else {
+    cOpt.disabled = false;
+  }
+}
+$("block-select").addEventListener("change", syncVariantForBlock);
+syncVariantForBlock();
+
 function resetProtectDownstream() {
   ["protect-test", "damage-out", "check-out", "repair-out"].forEach((id) => show($(id), false));
   ["damage-status", "check-status", "repair-status"].forEach((id) => { $(id).textContent = ""; });
 }
 
-$("protect-btn").addEventListener("click", () => withBusy($("protect-btn"), async () => {
+// Shared by the main "Protect this image" button and the per-page controls that
+// appear once an upload turns out to have more than one page (a multi-page PDF).
+async function runProtect(pageNum) {
   const st = $("protect-status");
   setStatus(st, "Embedding the watermark…", { loading: true });
   try {
@@ -232,9 +251,10 @@ $("protect-btn").addEventListener("click", () => withBusy($("protect-btn"), asyn
       image_id: $("id-input").value,
       block: parseInt($("block-select").value, 10),
       variant: $("variant-select").value,
+      page: pageNum || 1,
     };
     if (state.protectSource === "upload") {
-      if (!state.protectFile) throw new Error("Choose a PNG file to protect first.");
+      if (!state.protectFile) throw new Error("Choose a file to protect first.");
       body.upload_b64 = await fileToDataURL(state.protectFile);
       body.filename = state.protectFile.name;
     } else {
@@ -259,17 +279,82 @@ $("protect-btn").addEventListener("click", () => withBusy($("protect-btn"), asyn
       stat("File", fmtBytes(d.bytes), "Lossless PNG — the watermark survives saving."),
     ].join("");
 
+    const srcNote = $("protect-source-note");
+    srcNote.hidden = !d.source_note;
+    if (d.source_note) srcNote.textContent = d.source_note;
+
     $("saved-badge").textContent = `Saved to library as #${d.record_id}`;
     $("download-protected").href = `/api/library/${d.record_id}/download`;
     $("id-input").value = d.image_id;
     $("rect-y1").value = Math.min(96, d.height);
     $("rect-x1").value = Math.min(96, d.width);
 
+    const pagesWrap = $("protect-pages");
+    if (d.pages_available > 1) {
+      $("page-select").innerHTML = Array.from({ length: d.pages_available }, (_, i) =>
+        `<option value="${i + 1}"${i + 1 === d.page ? " selected" : ""}>` +
+        `Page ${i + 1} of ${d.pages_available}</option>`).join("");
+      $("protect-all-btn").textContent = `Protect all ${d.pages_available} pages`;
+      show(pagesWrap, true);
+    } else {
+      show(pagesWrap, false);
+    }
+
     show($("protect-result"));
     resetProtectDownstream();
     show($("protect-test"));
     setStatus(st, "Done — the two images below are indistinguishable, which is the point.");
     updateNavCount(d.library_size);
+  } catch (e) {
+    setStatus(st, e.message, { error: true });
+  }
+}
+
+$("protect-btn").addEventListener("click", () => withBusy($("protect-btn"), () => {
+  show($("protect-all-result"), false);
+  return runProtect(1);
+}));
+
+$("protect-page-btn").addEventListener("click", () => withBusy($("protect-page-btn"), () =>
+  runProtect(parseInt($("page-select").value, 10) || 1)));
+
+function protectAllCard(r) {
+  return `
+    <div class="lib-card">
+      <img src="${r.thumb}" alt="${esc(r.name)}">
+      <div>
+        <div class="lib-name">${esc(r.name)}</div>
+        <div class="lib-meta">
+          #${r.record_id} &middot; ${fmtInt(r.blocks)} blocks<br>
+          PSNR ${fmtNum(r.psnr, 2)} dB &middot; SSIM ${fmtNum(r.ssim, 4)}
+        </div>
+      </div>
+      <div class="lib-actions">
+        <a class="btn btn-sm" href="/api/library/${r.record_id}/download" download>Download</a>
+      </div>
+    </div>`;
+}
+
+$("protect-all-btn").addEventListener("click", () => withBusy($("protect-all-btn"), async () => {
+  const st = $("protect-all-status");
+  setStatus(st, "Protecting every page…", { loading: true });
+  try {
+    if (!state.protectFile) throw new Error("Choose a file to protect first.");
+    const body = {
+      key: $("key-input").value,
+      image_id: $("id-input").value,
+      block: parseInt($("block-select").value, 10),
+      variant: $("variant-select").value,
+      upload_b64: await fileToDataURL(state.protectFile),
+      filename: state.protectFile.name,
+    };
+    const d = await postJSON("/api/protect/all", body);
+    $("protect-all-grid").innerHTML = d.results.map(protectAllCard).join("");
+    $("protect-all-badge").textContent =
+      `${d.count} page${d.count === 1 ? "" : "s"} protected — library now ${d.library_size}`;
+    show($("protect-all-result"));
+    updateNavCount(d.library_size);
+    setStatus(st, "Done.");
   } catch (e) {
     setStatus(st, e.message, { error: true });
   }
@@ -437,9 +522,11 @@ function matchCard(d) {
 
 $("verify-btn").addEventListener("click", () => withBusy($("verify-btn"), async () => {
   const st = $("verify-status");
+  const errNote = $("verify-error-note");
+  show(errNote, false);
   setStatus(st, "Searching the library and verifying…", { loading: true });
   try {
-    if (!state.verifyFile) throw new Error("Choose a PNG file to verify first.");
+    if (!state.verifyFile) throw new Error("Choose a file to verify first.");
     const d = await postJSON("/api/verify", {
       upload_b64: await fileToDataURL(state.verifyFile),
       filename: state.verifyFile.name,
@@ -448,7 +535,13 @@ $("verify-btn").addEventListener("click", () => withBusy($("verify-btn"), async 
     setStatus(st, "Verification complete.");
   } catch (e) {
     show($("verify-result"), false);
-    setStatus(st, e.message, { error: true });
+    // The most likely failure by far is a lossy upload (JPEG/WEBP/GIF, or a rasterised
+    // PDF page) -- the server already explains exactly why in plain English, so that
+    // explanation gets its own readable panel rather than being squeezed into the
+    // one-line status text next to the button.
+    setStatus(st, "Verification failed — see details below.", { error: true });
+    errNote.textContent = e.message;
+    show(errNote, true);
   }
 }));
 
@@ -489,10 +582,15 @@ function renderVerifyResult(d) {
 
   const rb = $("v-repair-btn");
   rb.disabled = !d.repairable;
-  rb.title = d.repairable ? "" : "Nothing to repair — this image is intact.";
+  rb.title = d.repairable ? "" : "Nothing to rebuild — this image is intact.";
+  const rsb = $("v-restore-btn");
+  rsb.disabled = !d.repairable;
+  rsb.title = d.repairable ? "" : "Nothing to restore — this image is intact.";
   $("v-download-stored").href = `/api/library/${d.matched.id}/download`;
   show($("v-repair-out"), false);
+  show($("v-restore-out"), false);
   $("v-repair-status").textContent = "";
+  $("v-restore-status").textContent = "";
   show($("verify-result"));
 }
 
@@ -505,6 +603,35 @@ $("v-repair-btn").addEventListener("click", () => withBusy($("v-repair-btn"), as
     $("v-repair-stats").innerHTML = repairStats(d);
     show($("v-repair-out"));
     setStatus(st, "Repair complete — quality measured against the stored original.");
+  } catch (e) {
+    setStatus(st, e.message, { error: true });
+  }
+}));
+
+function restoreStats(d) {
+  return [
+    stat("Blocks restored", `${fmtInt(d.blocks_restored)} / ${fmtInt(d.total_blocks)}`,
+      "Every one of these was copied byte-for-byte from the library archive, not rebuilt."),
+    stat("Pixels changed", fmtInt(d.pixels_changed),
+      "How many pixels differed from the archive copy before this restore."),
+  ].join("");
+}
+
+$("v-restore-btn").addEventListener("click", () => withBusy($("v-restore-btn"), async () => {
+  const st = $("v-restore-status");
+  setStatus(st, "Copying the flagged blocks from the archive…", { loading: true });
+  try {
+    const d = await postJSON("/api/verify/restore", {});
+    $("v-img-restored").src = d.restored;
+    $("v-restore-stats").innerHTML = restoreStats(d);
+    const badge = $("v-restore-badge");
+    show(badge, !!d.bit_exact);
+    if (d.bit_exact) badge.textContent = "bit-exact — 0 pixels differ from the archive";
+    // Render the server's own explanation of what this endpoint did and did not do,
+    // rather than writing a competing claim here.
+    $("v-restore-note").textContent = d.note;
+    show($("v-restore-out"));
+    setStatus(st, "Restore complete.");
   } catch (e) {
     setStatus(st, e.message, { error: true });
   }

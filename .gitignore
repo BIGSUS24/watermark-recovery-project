@@ -24,6 +24,16 @@ output/*.log
 # be mistaken for current results by anyone reading the repo.
 output/*.bak
 
+# Screenshots and scratch images dropped into output/ while testing. These are
+# whatever the author happened to be photographing -- personal documents, in
+# practice -- and this is a public repository. The paper's real figures live in
+# output/figures/ and are committed explicitly.
+output/*.png
+output/*.jpg
+output/*.jpeg
+output/Screenshot*
+output/screenshots/
+
 # --- python ----------------------------------------------------------------
 __pycache__/
 *.py[cod]

@@ -98,6 +98,17 @@ def sniff_image_format(data: bytes) -> str:
     return "unknown"
 
 
+def effective_variant(block: int, variant: str) -> str:
+    """Variant C is a block-8 format; degrade to A at block 4 instead of raising.
+
+    Called from BOTH places that consume (block, variant) -- the sidebar control and
+    the tamper-preview path, which read the same two session_state keys independently.
+    Guarding only the sidebar would leave the other one passing C with block 4 straight
+    into embed_image(), which correctly refuses. One helper, so they cannot disagree.
+    """
+    return "A" if variant == "C" and block != 8 else variant
+
+
 @st.cache_data(show_spinner="Embedding watermark...")
 def embed_pipeline(img_bytes: bytes, key_str: str, image_id: str, block: int, variant: str
                    ) -> tuple[np.ndarray, np.ndarray, dict, bool]:
@@ -353,7 +364,7 @@ def _preset_callback(kind: str) -> None:
     key_str = st.session_state["secret_key"]
     image_id = st.session_state["image_id"]
     block = st.session_state["block"]
-    variant = st.session_state["variant"]
+    variant = effective_variant(block, st.session_state["variant"])
     tclass = st.session_state["tamper_class"]
     _, wm, _, _ = embed_pipeline(img_bytes, key_str, image_id, block, variant)
     h, w = wm.shape[:2]
@@ -498,9 +509,14 @@ def main() -> None:
                 help="Each photo is split into small squares of this many pixels per side before "
                      "protecting or checking it.")
             variant = adv2.radio(
-                "Descriptor variant", ["A", "B"], key="variant", horizontal=True,
-                help="Which recipe each square's backup uses to store its recovery data "
-                     "(DCT coefficients vs. simple averages).")
+                "Descriptor variant", ["C", "A", "B"], key="variant", horizontal=True,
+                help="Which recipe each square's backup uses to store its recovery data. "
+                     "C is the default and recovers roughly 3.4 dB better than A "
+                     "(variable-width DCT coefficients, block size 8 only); A uses 12 "
+                     "fixed-width DCT coefficients; B uses simple averages.")
+            if effective_variant(block, variant) != variant:
+                st.warning("Variant C needs block size 8 — using variant A at block 4.")
+            variant = effective_variant(block, variant)
             if "tau" not in st.session_state:
                 st.session_state["tau"] = 7
             tau = adv3.number_input(

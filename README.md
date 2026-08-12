@@ -11,6 +11,18 @@ marked explicitly unrecoverable if that partner is also flagged. Everything is
 deterministic, keyed, and training-free -- no ML, no GPU. Full methodology,
 notation, and results are in `paper/IEEE_Paper.tex`.
 
+Three descriptor variants share that container. **A** keeps 12 zig-zag DCT
+coefficients at a fixed 8 bits each; **B** keeps 2x2 block means; **C** is the
+default, and spends the same 96 bits on 31-34 variable-width coefficient fields
+chosen by rate-distortion optimization, plus one bit selecting between two
+allocation tables. C measures **+3.43 dB mean and +2.52 dB worst-case** recovered
+fidelity over A across 13 corpus images its tables were never fitted on -- so it is
+never the worse choice -- and roughly +4 dB on scanned-document content, which is A's
+worst case because text is broadband and 12 coefficients is a severe low-pass filter.
+The paper's experiment grid reports A and B; C's tables and their measured gain are
+reproduced by `python src/fit_variant_c.py`, which refits them and asserts they match
+the shipped constants.
+
 ## Just want to use it?
 
 **Setting this up on a new machine? Follow [INSTALL.md](INSTALL.md)** — every command
@@ -25,15 +37,37 @@ python webapp/server.py            # then open http://127.0.0.1:8765/
 
 The real round trip it is built for:
 
-1. **Protect an image** -- pick a corpus sample or upload your own PNG, embed the
-   watermark, and **download the protected file**. It is also saved to a local
-   library (`webapp/library.db`, SQLite) together with the key, the image identity
-   bound into every HMAC, and the block geometry -- the three things without which a
-   keyed fragile watermark cannot be checked again later.
+1. **Protect an image** -- pick a corpus sample or upload your own file (PNG, JPEG,
+   PDF, BMP, TIFF, WebP, GIF; PDFs page by page or all pages at once), embed the
+   watermark, and **download the protected file**, always as PNG. It is also saved to
+   a local library (`webapp/library.db`, SQLite) together with the key, the image
+   identity bound into every HMAC, and the block geometry -- the three things without
+   which a keyed fragile watermark cannot be checked again later.
 2. **Edit that downloaded file** in any image editor, anywhere, and save it as PNG.
 3. **Upload it under "Verify an upload."** The app works out *which* library record
-   it is, compares it against the stored copy, says where it was altered, and
-   offers **Repair**.
+   it is, compares it against the stored copy, and says where it was altered.
+
+Repair then comes in two flavours, and the difference is the honest part:
+
+- **Restore exactly from library** replaces the flagged blocks with the real bytes
+  from the stored copy. The result is byte-identical to the file that was originally
+  protected -- genuinely 100%, 0 unrecoverable, because the pixels come from the
+  archive. The watermark's contribution is proving the upload *is* that record and
+  localizing exactly which blocks changed, not reconstructing them. Worth stating
+  plainly rather than dressing up: a verifying block is provably bit-identical to the
+  stored one already (the tag pins all 512 bits of an 8x8 block), so restoring only
+  the flagged blocks reproduces the stored file exactly -- and the endpoint asserts
+  that equality rather than trusting it.
+- **Rebuild from watermark only** is the scheme itself: it consults no archive and
+  rebuilds flagged blocks from descriptors carried inside the surviving parts of the
+  image. Approximate by construction, and it marks rather than fabricates where a
+  block and its partner were both destroyed. This is the path the paper measures, and
+  the one that still works on a machine that has never seen your library.
+
+Uploads for *verification* must be lossless (PNG/BMP/TIFF, or a PDF carrying one) --
+a JPEG or WebP re-save discards precisely the two bit-planes the watermark occupies,
+so the app refuses with that explanation instead of reporting phantom tampering
+across the whole image. Protecting a lossy source is fine; only re-checking one is not.
 
 Identification uses no filenames and no perceptual hashing: it simply asks which
 record's key and image identity actually verify against these pixels. Under the
@@ -67,6 +101,7 @@ Run in this order -- each stage depends on the previous one's output:
 
 ```bash
 python samples/fetch_corpus.py     # downloads + SHA-256-pins the 32-image corpus into samples/manifest.csv
+python src/fit_variant_c.py        # re-derives variant C's tables; asserts they match payload.py
 python src/test_e2e.py             # KEYSTONE GATE -- must pass before any other result is trusted
 python src/run_experiments.py      # full 1,184-run grid -> output/runs.csv (use --quick for a 10-row smoke run)
 python src/sanity_gate.py          # checks runs.csv against measured bands; must print "overall: PASS"
@@ -78,7 +113,12 @@ python src/plots.py                # runs.csv -> output/figures/
 watermarked image produces **zero** flagged blocks (the "null condition"), plus
 the independent `m`/`minv` mapping-direction canary that the keystone assertion
 alone cannot catch. No number from any later stage means anything if this
-fails.
+fails. It runs 50 combinations (5 images x 2 colour modes x block 4/8 for A and B,
+plus block 8 for C, which is a block-8-only format) and pins 9 golden vectors of the
+wire format. Variant C is gated there rather than merely available, because it is
+what the app embeds by default and an ungated default is the exact thing the gate
+exists to prevent; adding it left A's and B's golden vectors bit-identical, which is
+the evidence that watermarks made before C still verify.
 
 `src/sanity_gate.py` checks `runs.csv` against bands measured from this corpus,
 and `src/make_tables.py` calls it first and refuses to emit tables if it fails --
@@ -88,8 +128,8 @@ the generated LaTeX, and a hardcoded false figure once reached a printed table
 through exactly that gap.
 
 Every module in `src/` (`payload.py`, `blockmap.py`, `embed.py`, `detect.py`,
-`recover.py`, `tamper.py`, `metrics.py`, ...) is independently runnable and
-carries its own self-check (`python src/<module>.py`) -- none of them require
+`recover.py`, `tamper.py`, `metrics.py`, `imageio_any.py`, `fit_variant_c.py`, ...)
+is independently runnable and carries its own self-check (`python src/<module>.py`) -- none of them require
 the full pipeline to verify their own piece in isolation. `python webapp/db.py`
 does the same for the library layer, against an in-memory database so it can
 never touch the real one.

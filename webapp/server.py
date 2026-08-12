@@ -16,7 +16,9 @@ Serves:   http://127.0.0.1:8765/
 
 import base64
 import csv
+import io
 import sys
+import zipfile
 from functools import wraps
 from pathlib import Path
 
@@ -31,6 +33,7 @@ sys.path.insert(0, str(SRC))
 
 import db  # noqa: E402  -- webapp/db.py, the protected-image library
 
+import imageio_any  # noqa: E402  -- decode-side format adapter (any format -> RGB)
 from embed import embed_image, load_image  # noqa: E402
 from detect import detect_image, expand_mask  # noqa: E402
 from recover import recover_image  # noqa: E402
@@ -39,9 +42,7 @@ from metrics import confusion_counts, loc_scores, recovery_metrics  # noqa: E402
 from payload import crop_to_blocks, default_image_id, to_blocks  # noqa: E402
 
 app = Flask(__name__, static_folder="static", static_url_path="")
-app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32MB: generous for one PNG upload
-
-PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32MB: generous for one upload
 
 # ---------------------------------------------------------------------------
 # Session state -- see module docstring's ponytail note
@@ -133,39 +134,83 @@ def thumbnail(rgb: np.ndarray, longest: int = 240) -> np.ndarray:
                       interpolation=cv2.INTER_AREA)
 
 
-def sniff_format(data: bytes) -> str:
-    """Identify an image by magic bytes -- never by filename extension."""
-    if data[:8] == PNG_MAGIC:
-        return "PNG"
-    if data[:2] == b"BM":
-        return "BMP"
-    if data[:4] in (b"II*\x00", b"MM\x00*"):
-        return "TIFF"
-    if data[:3] == b"\xff\xd8\xff":
-        return "JPEG"
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "WEBP"
-    return "unknown"
-
-
-def decode_upload(data_uri_or_b64: str) -> np.ndarray:
+def b64_to_bytes(data_uri_or_b64: str) -> bytes:
+    """Strip an optional data: URI prefix and base64-decode -- shared by every upload path."""
     raw = data_uri_or_b64.split(",", 1)[1] if data_uri_or_b64.startswith("data:") else data_uri_or_b64
     try:
-        data = base64.b64decode(raw)
+        return base64.b64decode(raw)
     except Exception:
         raise ApiError("upload is not valid base64", 400)
-    fmt = sniff_format(data)
-    if fmt != "PNG":
-        shown = fmt if fmt != "unknown" else "an unrecognized format"
-        raise ApiError(
-            f"PNG only -- detected {shown} by magic bytes. A fragile LSB watermark cannot "
-            "survive lossy re-encoding by design (this is a stated design limitation, not a "
-            "bug); convert to PNG and re-upload.", 400)
-    arr = np.frombuffer(data, dtype=np.uint8)
-    bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if bgr is None:
-        raise ApiError("could not decode PNG data", 400)
-    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+
+
+def decode_upload_pages(data_uri_or_b64: str, filename: str = "") -> list:
+    """Base64-decode an upload and hand it to imageio_any -- ANY format it supports
+    (PNG/JPEG/BMP/TIFF/WEBP/GIF/PDF), never PNG-only. Returns one imageio_any.Page per
+    page (more than one only for a multi-page PDF; imageio_any.MAX_PAGES caps that)."""
+    data = b64_to_bytes(data_uri_or_b64)
+    try:
+        return imageio_any.decode(data, filename=filename)
+    except ValueError as exc:
+        # imageio_any raises plain ValueError for every failure mode (bad/garbage format,
+        # decompression-bomb guard, corrupt PDF, missing pypdfium2 -- with a pip-install
+        # hint already in the message). `guarded` would 400 a bare ValueError anyway, but
+        # wrapping it here keeps every user-facing failure in this file going through
+        # ApiError, per the file's convention.
+        raise ApiError(str(exc), 400)
+
+
+def select_page(pages: list, body: dict) -> tuple:
+    """Pick the 1-based 'page' field (default 1); validate it against how many pages
+    this upload actually has. Returns (page, page_num, pages_available)."""
+    n = len(pages)
+    try:
+        page_num = int(body.get("page") or 1)
+    except (TypeError, ValueError):
+        raise ApiError("page must be an integer", 400)
+    if not (1 <= page_num <= n):
+        raise ApiError(f"page must be between 1 and {n} -- this upload has {n} page(s)", 400)
+    return pages[page_num - 1], page_num, n
+
+
+_LOSSY_UPLOAD_EXPLANATION = (
+    "{note} The watermark lives entirely in the two least-significant bits (LSBs) of "
+    "every pixel; any lossy re-encode -- JPEG, (assumed-lossy) WEBP, GIF's palette "
+    "quantization, or a rasterised PDF page -- overwrites those bits with new values. "
+    "A file that was ever saved through one of those has permanently lost its watermark: "
+    "there is nothing left to verify, no matter what format it is re-saved as afterwards."
+)
+
+
+def reject_lossy_format(raw: bytes) -> None:
+    """Verify-path gate on the SNIFFED FORMAT, applied BEFORE any decode is attempted.
+
+    The ordering is load-bearing, not tidiness. A JPEG that is truncated or corrupt
+    fails to decode, so with the gate after the decode the user got Pillow's "cannot
+    identify image file" -- a decoder's complaint about a symptom -- instead of the one
+    thing they need to be told, which is that a JPEG cannot carry this watermark at
+    all and no amount of re-saving will bring it back. The format IS the reason for the
+    refusal, so the format is what gets checked first.
+
+    PDF deliberately passes through: a PDF is a container, not a codec, and whether a
+    given page is lossy is only knowable after extraction -- reject_if_lossy() handles
+    that. An unrecognised format also passes through, so that decode can raise the
+    better error naming what it actually saw.
+    """
+    fmt = imageio_any.sniff(raw)
+    if fmt == "pdf" or fmt == "unknown" or fmt in imageio_any.LOSSLESS:
+        return
+    raise ApiError(_LOSSY_UPLOAD_EXPLANATION.format(
+        note=f"This file is {fmt.upper()} (detected from its magic bytes, not its "
+             f"name)."), 400)
+
+
+def reject_if_lossy(page) -> None:
+    """Verify-path gate: the uploaded pixels must be able to carry the watermark at all.
+    `page.lossy` already covers both cases the contract calls out -- jpeg/webp/gif (not
+    in imageio_any.LOSSLESS) AND a rasterised PDF page -- so one check handles both."""
+    if page.lossy:
+        raise ApiError(_LOSSY_UPLOAD_EXPLANATION.format(
+            note=page.note or f"{page.fmt} is a lossy source for this purpose."), 400)
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +312,28 @@ def load_manifest() -> list[dict]:
         return list(csv.DictReader(f))
 
 
+def parse_block_variant(body: dict) -> tuple[int, str]:
+    """Shared block/variant parsing + validation for /api/protect and /api/protect/all.
+
+    Root-caused here once rather than duplicated per route: variant C is a block=8-only
+    descriptor (src/payload.py's C_DESC_BITS table only exists at that width), so a
+    request combining C with block=4 must be rejected explicitly and loudly -- never
+    silently coerced to a different block or a different variant.
+    """
+    block = int(body.get("block", 8))
+    if block not in (4, 8):
+        raise ApiError("block size must be 4 or 8", 400)
+    variant = body.get("variant") or "C"
+    if variant not in ("A", "B", "C"):
+        raise ApiError("variant must be 'A', 'B', or 'C'", 400)
+    if variant == "C" and block != 8:
+        raise ApiError(
+            "variant C requires block size 8 (it is a rate-distortion-optimized DCT "
+            "descriptor defined only at that width) -- pick block 8, or use variant "
+            "'A' or 'B' for other block sizes.", 400)
+    return block, variant
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -309,18 +376,22 @@ def api_samples():
 def api_protect():
     body = request.get_json(force=True, silent=True) or {}
     key = (body.get("key") or "").strip() or "watermark-secret"
-    block = int(body.get("block", 8))
-    if block not in (4, 8):
-        raise ApiError("block size must be 4 or 8", 400)
-    variant = body.get("variant") or "A"
-    if variant not in ("A", "B"):
-        raise ApiError("variant must be 'A' or 'B'", 400)
+    block, variant = parse_block_variant(body)
 
     upload_b64 = body.get("upload_b64")
     sample = body.get("sample")
+    source_note = ""
+    page_num, pages_available = 1, 1
     if upload_b64:
-        rgb = decode_upload(upload_b64)
-        stem = Path(body.get("filename") or "upload").stem
+        filename = body.get("filename") or "upload"
+        pages = decode_upload_pages(upload_b64, filename=filename)
+        page, page_num, pages_available = select_page(pages, body)
+        # Never reject a protect upload for being lossy: the source pixels only need to
+        # be decodeable, because the protected output is always a fresh PNG, applied to
+        # whatever pixels came out of imageio_any -- lossy in is fine, the watermark goes
+        # on losslessly either way. `note` (e.g. "JPEG re-encodes pixels lossily...") is
+        # surfaced as source_note purely so the UI can tell the user what they started from.
+        rgb, stem, source_note = page.rgb, page.name, page.note
     elif sample:
         match = next((r for r in load_manifest() if r["relpath"] == sample), None)
         if match is None:
@@ -339,7 +410,7 @@ def api_protect():
         wm, info = embed_image(rgb, key, image_id, block, variant)
     except ValueError as exc:
         # The only ValueError embed_image can raise here (dtype/channel-count are
-        # already guaranteed by decode_upload/load_image above) is build_map's
+        # already guaranteed by imageio_any.decode/load_image above) is build_map's
         # "K<3 blocks" case -- see blockmap.py's docstring.
         raise ApiError(
             f"This image is too small for block size {block}: the recovery-descriptor "
@@ -371,7 +442,95 @@ def api_protect():
         width=int(wm.shape[1]), height=int(wm.shape[0]),
         record_id=record_id, name=f"{stem}.png", library_size=library_size,
         sha256=db.sha256_hex(wm_png), bytes=len(wm_png),
+        source_note=source_note, pages_available=pages_available, page=page_num,
     )
+
+
+@app.route("/api/protect/all", methods=["POST"])
+@guarded
+def api_protect_all():
+    """Protect EVERY page of one upload in one shot (the multi-page-PDF case) -- each
+    page becomes its own library record, and all of them download together as a zip.
+
+    SESSION still holds only the single-image model (see module docstring): it is left
+    pointing at the LAST page protected, purely so the existing single-image UI has
+    something coherent to show after this runs, not as a real multi-page session.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    key = (body.get("key") or "").strip() or "watermark-secret"
+    block, variant = parse_block_variant(body)
+
+    upload_b64 = body.get("upload_b64")
+    if not upload_b64:
+        raise ApiError("provide 'upload_b64' -- protect/all works on an uploaded file's "
+                       "every page", 400)
+    filename = body.get("filename") or "upload"
+    base_stem = Path(filename).stem
+    # imageio_any.decode() already caps a multi-page PDF at imageio_any.MAX_PAGES pages
+    # -- nothing further to enforce here.
+    pages = decode_upload_pages(upload_b64, filename=filename)
+    image_id_str = (body.get("image_id") or "").strip()
+
+    results = []
+    protected_pngs: dict[str, bytes] = {}
+    con = db.connect()
+    try:
+        for i, page in enumerate(pages, start=1):
+            name = f"{base_stem} p{i}"
+            cropped_original, _ = crop_to_blocks(page.rgb, block)
+            image_id = (image_id_str.encode("utf-8") if image_id_str
+                       else default_image_id(name, cropped_original.shape, block))
+            try:
+                wm, info = embed_image(page.rgb, key, image_id, block, variant)
+            except ValueError as exc:
+                raise ApiError(
+                    f"page {i} ('{name}') is too small for block size {block}: the "
+                    "recovery-descriptor map needs at least 3 blocks -- use an image of "
+                    "at least 24x24 pixels at block=8 (12x12 at block=4), or switch "
+                    f"block size. ({exc})", 400)
+
+            wm_png = encode_png_bytes(wm)
+            record_id = db.insert(
+                con, name=name, height=wm.shape[0], width=wm.shape[1],
+                block=block, variant=variant, key=key, image_id=image_id, png=wm_png,
+                psnr=info["psnr"], ssim=info["ssim"], blocks=info["K"])
+            protected_pngs[name] = wm_png
+            results.append(dict(
+                record_id=record_id, name=name, psnr=info["psnr"], ssim=info["ssim"],
+                blocks=info["K"], thumb=encode_png_data_uri(thumbnail(wm))))
+
+            SESSION.clear()
+            SESSION.update(original=cropped_original, watermarked=wm, key=key,
+                           image_id=image_id, block=block, variant=variant,
+                           embed_info=info, record_id=record_id, name=name)
+        library_size = db.count(con)
+    finally:
+        con.close()
+
+    if not results:
+        raise ApiError("upload decoded to zero pages", 400)  # imageio_any never returns this
+
+    SESSION["protect_all_pngs"] = protected_pngs
+    SESSION["protect_all_stem"] = base_stem
+    return ok(results=results, count=len(results), library_size=library_size)
+
+
+@app.route("/api/protect/all/download")
+@guarded
+def api_protect_all_download():
+    pngs = SESSION.get("protect_all_pngs")
+    if not pngs:
+        raise ApiError("there is nothing to download yet -- run /api/protect/all first", 409)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, png_bytes in pngs.items():
+            zf.writestr(f"{name}.png", png_bytes)
+    data = buf.getvalue()
+    stem = SESSION.get("protect_all_stem") or "protected"
+    return Response(data, mimetype="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="{stem}_pages.zip"',
+        "Content-Length": str(len(data)),
+    })
 
 
 @app.route("/api/damage", methods=["POST"])
@@ -651,6 +810,7 @@ _DOWNLOADABLE = {
     "protected": ("watermarked", "protected"),
     "damaged": ("tampered", "damaged"),
     "repaired": ("repaired_image", "repaired"),
+    "restored": ("restored_image", "restored"),
 }
 
 
@@ -772,11 +932,17 @@ def api_verify():
     body = request.get_json(force=True, silent=True) or {}
     upload_b64 = body.get("upload_b64")
     if not upload_b64:
-        raise ApiError("upload a PNG file to verify", 400)
-    raw = base64.b64decode(upload_b64.split(",", 1)[1] if upload_b64.startswith("data:")
-                           else upload_b64)
-    uploaded = decode_upload(upload_b64)
+        raise ApiError("upload a file to verify", 400)
+    raw = b64_to_bytes(upload_b64)
     filename = body.get("filename") or "upload.png"
+    reject_lossy_format(raw)      # before decode -- see the docstring for why
+    pages = decode_upload_pages(upload_b64, filename=filename)
+    page, page_num, pages_available = select_page(pages, body)
+    # The uploaded pixels must be ABLE to carry the watermark. jpeg/webp/gif (not in
+    # imageio_any.LOSSLESS) and a rasterised PDF page are both `lossy=True` -- reject
+    # before wasting a detection pass on pixels that can never verify.
+    reject_if_lossy(page)
+    uploaded = page.rgb
 
     con = db.connect()
     try:
@@ -827,6 +993,7 @@ def api_verify():
             overlay_pixel_mask(uploaded, truth["pixel_mask"], color=(0, 200, 120))),
         diff=encode_png_data_uri(amplify_diff(stored, uploaded)),
         repairable=flagged > 0,
+        pages_available=pages_available, page=page_num,
     )
     if det.info.get("suspect_message"):
         resp["suspect_message"] = det.info["suspect_message"]
@@ -860,6 +1027,62 @@ def api_verify_repair():
         psnr_in_region=rm["psnr_in_region"], ssim_in_region=rm["ssim_in_region"],
         psnr_whole=rm["psnr_whole"], ssim_whole=rm["ssim_whole"],
         record_id=SESSION.get("record_id"),
+    )
+
+
+@app.route("/api/verify/restore", methods=["POST"])
+@guarded
+def api_verify_restore():
+    """Exact library-backed restore -- a sibling of /api/verify/repair, not a
+    replacement. Requires the same session state /api/verify/repair does (a prior
+    /api/verify that identified a library record); both stay available.
+
+    The reasoning, which is why this is safe to do with a straight pixel copy instead
+    of any reconstruction: a block only "passes" verification because its 32-bit tag
+    (an HMAC over that block's 6 MSB planes AND the 96 descriptor bits it carries) was
+    recomputed and matched. Those 512 bits are exactly what an 8x8 block holds, so a
+    passing block is provably bit-identical to the archive copy already -- nothing
+    about it is uncertain. The DETECTED (never ground-truth) mask below is therefore
+    exactly the set of pixels that still need copying from the archive; copying just
+    those must reproduce the archive file exactly, which is the one fact this endpoint
+    checks on every call rather than assuming.
+    """
+    det = require("det", "Verify an uploaded image first.")
+    uploaded = require("tampered", "Verify an uploaded image first.")
+    stored = SESSION["watermarked"]
+
+    mask = np.asarray(det.pixel_mask, dtype=bool)  # DETECTED mask -- never ground truth
+    pixels_changed = int(np.count_nonzero(np.any(uploaded != stored, axis=2)))
+    out = uploaded.copy()
+    out[mask] = stored[mask]
+
+    # The keystone property this endpoint rests on, checked for real rather than taken
+    # on faith: restoring only the flagged blocks from the archive must reproduce the
+    # archive file exactly. If this ever fails, something upstream is badly wrong (a
+    # shape mismatch, the wrong record, a crop disagreement) -- let it crash loudly
+    # (-> a clean 500 via `guarded`) instead of silently handing back a wrong image.
+    assert np.array_equal(out, stored)
+
+    SESSION["restored_image"] = out
+
+    return ok(
+        restored=encode_png_data_uri(out),
+        blocks_restored=int(det.block_mask.sum()),
+        total_blocks=int(det.info["K"]),
+        bit_exact=bool(np.array_equal(out, stored)),
+        pixels_changed=pixels_changed,
+        record_id=SESSION.get("record_id"),
+        note=(
+            "This is an EXACT restore from the stored archive copy, not a "
+            "reconstruction: every pixel in the flagged region is copied byte-for-byte "
+            "from the library record verification identified. The watermark's only job "
+            "here is proving this upload IS that record and pinpointing exactly which "
+            "blocks changed -- the returned pixels come from the archive, not from the "
+            "watermark. Contrast with /api/verify/repair, which reconstructs the flagged "
+            "region from the watermark's own recovery descriptors alone and needs no "
+            "archive copy at all -- more self-contained, but only ever as good as what "
+            "the descriptors could carry, never bit-exact."
+        ),
     )
 
 

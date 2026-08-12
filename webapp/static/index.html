@@ -82,15 +82,17 @@
 
         <div class="src-pane" id="src-upload">
           <label class="drop" id="protect-drop" for="upload-input">
-            <input type="file" id="upload-input" accept="image/png,.png" hidden>
+            <input type="file" id="upload-input"
+                   accept=".png,.jpg,.jpeg,.pdf,.bmp,.tif,.tiff,.webp,.gif,image/png,image/jpeg,image/bmp,image/tiff,image/webp,image/gif,application/pdf"
+                   hidden>
             <span class="drop-glyph" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
                    stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 16V4m0 0L8 8m4-4l4 4"/><path d="M4 16v2.5A1.5 1.5 0 005.5 20h13a1.5 1.5 0 001.5-1.5V16"/>
               </svg>
             </span>
-            <span class="drop-main">Drop a PNG here, or click to browse</span>
-            <span class="drop-sub">PNG only — a fragile watermark cannot survive JPEG re-encoding</span>
+            <span class="drop-main">Drop an image or PDF here, or click to browse</span>
+            <span class="drop-sub">PNG, JPEG, PDF, BMP, TIFF, WebP or GIF — the protected file you download back is always a lossless PNG</span>
           </label>
           <div class="drop-file" id="protect-file" hidden></div>
         </div>
@@ -116,13 +118,17 @@
             <div class="field">
               <label class="lbl" for="variant-select">Descriptor</label>
               <select id="variant-select">
-                <option value="A" selected>A — DCT (default)</option>
+                <option value="A">A — DCT</option>
                 <option value="B">B — mean-pooled</option>
+                <option value="C" selected>C — optimized DCT (recommended)</option>
               </select>
             </div>
           </div>
           <p class="fine">The key and identity are what make the watermark forgery-resistant.
-            Both are stored with the image in the local library so it can be verified again later.</p>
+            Both are stored with the image in the local library so it can be verified again later.
+            Descriptor C measures the highest recovered fidelity of the three and is the default,
+            but it only exists at block size 8 — picking a 4×4 block switches the descriptor back
+            to A automatically.</p>
         </details>
 
         <div class="actions">
@@ -138,6 +144,7 @@
         </div>
 
         <div class="stats" id="protect-stats"></div>
+        <p class="warn-note" id="protect-source-note" hidden></p>
 
         <div class="compare">
           <figure><img id="img-original" alt="Original image"><figcaption>Original</figcaption></figure>
@@ -159,6 +166,29 @@
         <p class="fine">Download it, edit any part of it in any image editor, save as PNG,
           then upload it under <strong>Verify an upload</strong>. The system will find it in
           the library and show you exactly what you changed.</p>
+
+        <div id="protect-pages" hidden>
+          <div class="field">
+            <label class="lbl" for="page-select">Page</label>
+            <select id="page-select"></select>
+          </div>
+          <div class="actions">
+            <button class="btn btn-ghost btn-sm" id="protect-page-btn">Protect this page</button>
+            <button class="btn btn-primary btn-sm" id="protect-all-btn">Protect all pages</button>
+            <span class="status" id="protect-all-status"></span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card" id="protect-all-result" hidden>
+        <div class="card-head">
+          <h2>All pages protected</h2>
+          <span class="badge badge-ok" id="protect-all-badge"></span>
+        </div>
+        <div class="lib-grid" id="protect-all-grid"></div>
+        <div class="actions">
+          <a class="btn btn-primary" id="protect-all-download" href="/api/protect/all/download" download>Download all as ZIP</a>
+        </div>
       </article>
 
       <article class="card" id="protect-test" hidden>
@@ -236,7 +266,9 @@
 
       <article class="card">
         <label class="drop" id="verify-drop" for="verify-input">
-          <input type="file" id="verify-input" accept="image/png,.png" hidden>
+          <input type="file" id="verify-input"
+                 accept=".png,.bmp,.tif,.tiff,.pdf,image/png,image/bmp,image/tiff,application/pdf"
+                 hidden>
           <span class="drop-glyph" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
                  stroke-linecap="round" stroke-linejoin="round">
@@ -244,9 +276,11 @@
             </svg>
           </span>
           <span class="drop-main">Drop the image to check, or click to browse</span>
-          <span class="drop-sub">It must be a PNG that this app protected earlier</span>
+          <span class="drop-sub">PNG, BMP, TIFF or PDF that this app protected earlier — a lossy
+            re-save (JPEG, WebP, GIF) always destroys the watermark first</span>
         </label>
         <div class="drop-file" id="verify-file" hidden></div>
+        <p class="warn-note" id="verify-error-note" hidden></p>
         <div class="actions">
           <button class="btn btn-primary" id="verify-btn" disabled>Identify and verify</button>
           <span class="status" id="verify-status"></span>
@@ -269,10 +303,36 @@
         <div class="frame"><img id="verify-img" alt="Verification view"></div>
         <p class="cap" id="verify-caption"></p>
 
+        <p class="lead">Two ways to fix a tampered file, and they are not the same guarantee.
+          Exact restore uses the watermark only to prove which library record this is and to
+          pinpoint exactly which blocks changed — the pixels themselves then come straight
+          from that archive copy, byte for byte. Rebuild from watermark only needs no archive
+          at all: it reconstructs the damaged blocks purely from the recovery data hidden
+          inside the surviving pixels, which is the only option when there is nothing on file
+          to restore from, and it is approximate, never bit-exact.</p>
+
         <div class="actions">
-          <button class="btn btn-primary" id="v-repair-btn">Repair this image</button>
+          <button class="btn btn-primary" id="v-restore-btn">Restore exactly from library</button>
+          <button class="btn btn-ghost" id="v-repair-btn">Rebuild from watermark only</button>
           <a class="btn btn-ghost" id="v-download-stored" download>Download the stored original</a>
+          <span class="status" id="v-restore-status"></span>
           <span class="status" id="v-repair-status"></span>
+        </div>
+
+        <div id="v-restore-out" hidden>
+          <div class="card-head">
+            <h2>Restored exactly</h2>
+            <span class="badge badge-ok" id="v-restore-badge" hidden></span>
+          </div>
+          <div class="stats" id="v-restore-stats"></div>
+          <div class="compare one">
+            <figure><img id="v-img-restored" alt="Restored image">
+              <figcaption>Restored — the flagged region copied byte-for-byte from the library archive</figcaption></figure>
+          </div>
+          <p class="fine" id="v-restore-note"></p>
+          <div class="actions">
+            <a class="btn btn-primary" id="v-download-restored" href="/api/download/restored" download>Download restored image</a>
+          </div>
         </div>
 
         <div id="v-repair-out" hidden>
@@ -391,9 +451,13 @@
       <article class="card">
         <div class="card-head"><h2>Honest limitations</h2></div>
         <ul class="limits">
-          <li><strong>PNG only, by design.</strong> The watermark lives in the two
-            least-significant bits. JPEG or lossy WEBP re-encoding destroys it — a stated
-            property of a deliberately fragile watermark, not a bug.</li>
+          <li><strong>Protect almost anything; verify only what survived losslessly.</strong>
+            The watermark lives in the two least-significant bits of every pixel. Protecting
+            accepts PNG, JPEG, PDF, BMP, TIFF, WebP, or GIF as a source — the file handed back
+            is always a fresh, lossless PNG. Verifying is stricter by necessity: it only accepts
+            PNG, BMP, TIFF, or PDF, because JPEG, WebP, and GIF all re-encode pixels lossily and
+            overwrite exactly the bits the watermark lives in. A deliberately fragile watermark
+            working as designed, not a bug.</li>
           <li><strong>Only images it protected first.</strong> There is nothing to verify in
             an image that was never watermarked, which is why the library exists.</li>
           <li><strong>Repair is an approximation.</strong> Recovery rebuilds a low-frequency

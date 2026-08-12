@@ -145,9 +145,12 @@ The app runs entirely on your own machine. Nothing is uploaded anywhere.
 
 1. Click **Protect an image** in the left menu.
 2. Either leave **Sample image** selected, or click **Upload my own** and choose a
-   **PNG** file.
+   file. **PNG, JPG, PDF, BMP, TIFF, WebP and GIF all work** — whatever you have.
+   A PDF is handled a page at a time; pick the page, or use **Protect all pages**
+   to do the whole document at once and download the results as a ZIP.
 3. Click **Protect this image**.
-4. Click **Download protected image**.
+4. Click **Download protected image**. What you get back is always a PNG, whatever
+   you put in — see the note about JPEG under [limits](#important-limits-these-are-by-design-not-faults).
 
 You now have a file that looks identical to the original but carries an invisible,
 tamper-evident watermark. It has also been saved into a local library, along with
@@ -163,7 +166,23 @@ the secret key needed to check it later.
 The app works out which library record the file is, without being told, and shows
 you exactly which parts were altered.
 
-8. Click **Repair this image** to rebuild the damaged parts.
+8. Repair it. You get **two** buttons here, and they are genuinely different things:
+
+   - **Restore exactly from library** — gives you back the protected file
+     *byte for byte*. Perfect, every pixel. It can do that because the app kept a
+     copy when you protected the image, so it has the real pixels to put back. The
+     watermark's job here is to prove this upload is that stored record and to
+     pinpoint exactly which blocks were altered.
+   - **Rebuild from watermark only** — ignores the stored copy entirely and
+     rebuilds the damaged areas from recovery data hidden inside the *surviving
+     parts of the image itself*. This is the interesting one: it works on a file
+     from a machine that has never seen your library. It is approximate — the
+     rebuilt patches are softer than the original — and where damage happened to
+     destroy both a block and the block holding its backup, it marks the area
+     rather than inventing content.
+
+   Use the first if you just want your file back. Use the second to see what the
+   watermarking scheme itself can actually do.
 
 ### Fastest possible demo
 
@@ -174,15 +193,22 @@ Don't want to juggle files? On the **Protect an image** page, scroll to
 
 ## Important limits (these are by design, not faults)
 
-- **PNG only.** The watermark lives in the two least-significant bits of each pixel.
-  Saving as JPEG throws those bits away. That is the price of a watermark fragile
-  enough to notice a single altered pixel.
+- **You can protect almost any format, but you can only check a lossless one.**
+  Protecting accepts PNG, JPG, PDF, BMP, TIFF, WebP and GIF, and always hands back a
+  PNG. Checking a file requires PNG, BMP, TIFF or PDF. The reason is not fussiness:
+  the watermark lives in the two least-significant bits of every pixel, and saving
+  as JPEG or WebP throws exactly those bits away. **A protected file that is ever
+  re-saved as JPEG has lost its watermark permanently** — there is no recovering
+  from that, and the app will tell you so rather than pretend. That fragility is the
+  point; it is what lets the scheme notice a single altered pixel.
 - **Only images this app protected.** There is nothing to check in a photo that was
   never watermarked. That is what the library is for.
 - **Do not resize or crop** a protected file. The check works on an 8×8 grid; move
   the grid and nothing lines up.
-- **Repaired areas are approximations** — a low-frequency reconstruction, visibly
-  softer than the original. Never a pixel-perfect restore.
+- **"Rebuild from watermark only" is approximate** — a low-frequency reconstruction,
+  softer than the original, and it marks rather than invents where a block and its
+  backup were both destroyed. If you want your file back exactly, use **Restore
+  exactly from library**, which is byte-for-byte perfect.
 - **The library stores keys in plain text**, next to the images. Correct for a local
   personal tool. Wrong for a real deployment, where keys belong in an OS keyring or
   hardware security module and never sit beside the file they authenticate.
@@ -210,8 +236,21 @@ python src/payload.py
 python src/blockmap.py
 python src/embed.py
 python src/detect.py
+python src/imageio_any.py
 python webapp/db.py
 ```
+
+The app's default descriptor, **variant C**, has its quantization tables derived
+rather than hand-picked. To re-derive them from scratch and confirm they match the
+constants the code ships:
+
+```
+python src/fit_variant_c.py
+```
+
+It refits from a procedurally generated document page plus three corpus photographs,
+asserts the result equals the shipped tables exactly, and prints the measured
+fidelity gain over variant A on corpus images the fit never saw.
 
 ---
 
@@ -241,10 +280,19 @@ Then open <http://127.0.0.1:9000/>.
 Make sure the terminal still shows the server running. Use `http://127.0.0.1:8765/`,
 not `https://` — there is no certificate, because nothing leaves your machine.
 
-**"PNG only — detected JPEG by magic bytes"**
-Your file is a JPEG, whatever its name says. The app checks the file's actual
-contents, not its extension. Open it in an editor and re-save as PNG. Note that a
-photo that was *ever* a JPEG has already lost its watermark permanently.
+**On the verify page: "re-saving as JPEG destroys the two least-significant bits…"**
+Your file is a JPEG, whatever its name says — the app checks the file's actual
+contents, not its extension. You cannot fix this by converting it to PNG now: the
+bits were discarded when it was saved as JPEG, and converting back cannot invent
+them. Re-download the protected file from the library and keep it as PNG this time.
+(Protecting a JPEG is fine — it is only *checking* one that cannot work.)
+
+**"PDF support needs pypdfium2"**
+PDF input is the one optional dependency. Run:
+```
+pip install pypdfium2
+```
+Everything else works without it.
 
 **"This file matches no protected image in the library"**
 One of these is true: the file was never protected by this app; it was protected on

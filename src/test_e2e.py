@@ -38,7 +38,14 @@ def test_keystone() -> None:
     for base in images:
         for I in (base, np.stack([base] * 3, axis=-1)):     # 2 colour modes
             for B in (4, 8):                                  # 2 block sizes
-                for variant in ("A", "B"):                    # 2 variants
+                for variant in ("A", "B", "C"):               # 3 variants
+                    # Variant C is a block=8 format by construction: its bit
+                    # allocation table has 64 entries and there is no 16-entry
+                    # equivalent. It is gated here rather than merely available,
+                    # because it is what the web app now embeds BY DEFAULT -- an
+                    # ungated default is the one thing this gate exists to prevent.
+                    if variant == "C" and B != 8:
+                        continue
                     wm, info = embed_image(I, KEY, b"e2e", B, variant)
                     det = detect_image(wm, KEY, b"e2e", B, variant, refine=False)
 
@@ -73,10 +80,11 @@ def test_keystone() -> None:
                         assert np.array_equal(det.desc_by_owner[ch], own)
 
                     n += 1
-                    print(f"  [{n}/40] B={B} variant={variant} colour={I.ndim == 3}: "
+                    print(f"  [{n}/50] B={B} variant={variant} colour={I.ndim == 3}: "
                           f"psnr={info['psnr']:.2f}")
 
-    assert n == 40
+    # 5 images x 2 colour modes x (2 block sizes x A,B  +  block 8 only x C)
+    assert n == 50, n
 
 
 def test_tamper_smoke() -> None:
@@ -153,6 +161,15 @@ GOLDEN = {
     "A_sha256": "834bed6ae49d74cb5c840dcbac3280c009829742c6dfc831e6c52d9615643403",
     "B_payload_b0": "7b06f057a1a76f82255761ab5fc22567",
     "B_sha256": "bf3b2f662897a3f428d18b6f7b57f53ad1a5be71778395b0e1b9ad327677c386",
+    # Variant C, added when C became the app's default descriptor. C packs 31-34
+    # variable-width signed fields by hand instead of getting sign handling free
+    # from int8's byte view, so a one-bit offset slip in the packer is exactly the
+    # class of change that must fail here rather than downstream.
+    # Adding these did NOT disturb A_* or B_* above -- verified by regenerating all
+    # of them together. That is the evidence that introducing C left the existing
+    # wire format bit-identical, so watermarks made before C still verify.
+    "C_payload_b0": "2cd4715a830fc809f2207be3ce34ac27",
+    "C_sha256": "bb914f8193176a761498c58c58c06945c55cdd89ef4d01f955fb67dd4b3459b9",
     "map4096_sha": "aa4456c3b7e36904d66853dab441b48ac896ee950328aa2e2e4131389eada921",
 }
 
@@ -161,7 +178,7 @@ def _golden_actual() -> dict:
     """Compute the current golden values, for both verification and --regen."""
     m, minv, _ = build_map(GOLDEN_KEY, GOLDEN_ID, GOLDEN_IMG.shape, 8)
     out = {"map_m": tuple(int(x) for x in m), "map_minv": tuple(int(x) for x in minv)}
-    for variant in ("A", "B"):
+    for variant in ("A", "B", "C"):
         wm, _ = embed_image(GOLDEN_IMG, GOLDEN_KEY, GOLDEN_ID, 8, variant)
         blocks = to_blocks(wm, 8)
         bits = lsb_pairs_to_bits(lsb_pairs_from_blocks(blocks))
@@ -201,4 +218,4 @@ if __name__ == "__main__":
     test_keystone()
     test_tamper_smoke()
     test_golden_vectors()
-    print("test_e2e.py: keystone gate PASSED (40/40)")
+    print("test_e2e.py: keystone gate PASSED (50/50)")
