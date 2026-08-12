@@ -421,6 +421,27 @@
         <p>The whole scheme in four steps, and the limits that come with it.</p>
       </header>
 
+      <article class="card hero3d">
+        <div class="card-head">
+          <h2>The scheme, running</h2>
+          <span class="badge badge-ok">drag to orbit</span>
+        </div>
+        <!-- tabindex + role/label: the model is content, and the drag control has
+             a keyboard equivalent in scene3d.js, so it must be reachable by tab. -->
+        <canvas id="scheme3d" width="900" height="420" tabindex="0" role="img"
+                aria-label="Animated three-dimensional model of an eight by eight block grid:
+                            signature and backup planes fold into the pixels, a pen stroke
+                            damages a diagonal band, each damaged block is localised, then
+                            rebuilt from the backup carried by a distant intact block."></canvas>
+        <p class="hero3d-cap" id="scheme3d-cap" aria-live="off"></p>
+        <ul class="legend">
+          <li><span class="swatch sw-plain"></span>intact block</li>
+          <li><span class="swatch sw-lsb"></span>the two hidden bit planes</li>
+          <li><span class="swatch sw-bad"></span>flagged: signature no longer matches</li>
+          <li><span class="swatch sw-unrec"></span>unrecoverable: its backup died too</li>
+        </ul>
+      </article>
+
       <div class="steps">
         <article class="card step">
           <span class="step-n">01</span><h2>Split every 8×8 block's budget in two</h2>
@@ -475,5 +496,6 @@
 </div>
 
 <script src="app.js"></script>
+<script src="scene3d.js"></script>
 </body>
 </html>

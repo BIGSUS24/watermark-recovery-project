@@ -81,7 +81,18 @@ it by.
 Also in the app: a "test it right here" path (damage -> detect -> repair without
 leaving the page), a library view with per-record download/verify/delete, the two
 adversarial set-pieces, and a per-block evidence panel. Flask plus hand-written
-HTML/CSS/JS -- no build step, no CDN, no external network requests. `--port` and
+HTML/CSS/JS -- no build step, no CDN, no external network requests.
+
+"How it works" opens with an animated 3-D model of the scheme (`webapp/static/scene3d.js`):
+64 block towers over three planes, cycling embed -> protected -> tampered -> detect ->
+recover, draggable and keyboard-orbitable. It is not decoration -- the block-to-partner
+map is a fixed coprime stride like the real one, and a block turns magenta only when it
+*and* its partner were both hit, which is the coincidence limit the Attack lab proves.
+Canvas 2-D with a hand-written projector, depth sort and back-face cull, ~300 lines: a
+CDN `<script>` would break the "nothing leaves this machine" claim on every page load,
+and vendoring a WebGL library to draw 192 axis-aligned boxes is the other bad option.
+Every colour is a design token read at run time, so the model re-themes with the app,
+and `prefers-reduced-motion` freezes it on the recover pose rather than hiding it. `--port` and
 `--host` are available if 8765 is taken; `WATERMARK_DB=<path>` points the library at
 a different file, which is how the test suite avoids touching your real one.
 
