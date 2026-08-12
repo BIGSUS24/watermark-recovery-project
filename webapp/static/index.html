@@ -245,8 +245,13 @@
         <div id="repair-out" hidden>
           <div class="compare one">
             <figure><img id="img-repaired" alt="Repaired image">
-              <figcaption>Repaired — magenta hatch marks blocks that could not be recovered</figcaption></figure>
+              <figcaption id="repair-caption">Repaired — magenta hatch marks blocks that could not be recovered</figcaption></figure>
           </div>
+          <label class="switch" id="fill-row" hidden>
+            <input type="checkbox" id="fill-toggle">
+            <span>Fill the marked gaps by interpolation <strong>(cosmetic only — guessed
+              from neighbouring pixels, not recovered from the watermark)</strong></span>
+          </label>
           <div class="stats" id="repair-stats"></div>
           <div class="actions">
             <a class="btn btn-ghost" id="download-repaired" href="/api/download/repaired" download>Download repaired image</a>
@@ -338,8 +343,13 @@
         <div id="v-repair-out" hidden>
           <div class="compare one">
             <figure><img id="v-img-repaired" alt="Repaired image">
-              <figcaption>Repaired — magenta hatch marks blocks that could not be recovered</figcaption></figure>
+              <figcaption id="v-repair-caption">Repaired — magenta hatch marks blocks that could not be recovered</figcaption></figure>
           </div>
+          <label class="switch" id="v-fill-row" hidden>
+            <input type="checkbox" id="v-fill-toggle">
+            <span>Fill the marked gaps by interpolation <strong>(cosmetic only — guessed
+              from neighbouring pixels, not recovered from the watermark)</strong></span>
+          </label>
           <div class="stats" id="v-repair-stats"></div>
           <div class="actions">
             <a class="btn btn-primary" id="v-download-repaired" href="/api/download/repaired" download>Download repaired image</a>
@@ -482,7 +492,12 @@
           <li><strong>Only images it protected first.</strong> There is nothing to verify in
             an image that was never watermarked, which is why the library exists.</li>
           <li><strong>Repair is an approximation.</strong> Recovery rebuilds a low-frequency
-            version of what was destroyed — visibly softer, never pixel-perfect.</li>
+            version of what was destroyed — visibly softer, never pixel-perfect. A 96-bit
+            descriptor cannot carry 512 bits of block, so rebuilding from the watermark alone
+            can never reach 100%. <strong>Restore exactly from library</strong> can, and does:
+            it is byte-identical, with no magenta anywhere. The interpolation toggle on a
+            repair is cosmetic — those pixels are guessed from their neighbours, carry no
+            cryptographic backing, and are excluded from every number shown.</li>
           <li><strong>Resizing or cropping breaks it.</strong> The block grid no longer lines
             up, so verification fails everywhere rather than pointing at a region.</li>
           <li><strong>The demo key sits next to the image.</strong> Fine for a local tool,

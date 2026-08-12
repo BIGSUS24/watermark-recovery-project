@@ -64,6 +64,24 @@ Repair then comes in two flavours, and the difference is the honest part:
   block and its partner were both destroyed. This is the path the paper measures, and
   the one that still works on a machine that has never seen your library.
 
+Only the second path can leave magenta blocks, and it cannot reach 100% by
+construction: a 96-bit descriptor cannot carry 512 bits of block, and when a block
+and the single block holding its backup are both destroyed there is nothing left to
+read. If you want the file back exactly, that is what the first path is for -- it is
+byte-identical, with no magenta anywhere.
+
+For the second path there is one presentation affordance: a toggle that interpolates
+the marked gaps away (`cosmetic_fill` in `webapp/server.py` and `demo/app.py`). It is
+**off by default, cosmetic, and structurally quarantined**. Those pixels have no
+cryptographic provenance -- every other pixel in a repair came from a descriptor
+carried by a block whose tag verified; these came from an interpolator guessing at
+the neighbours. It runs on a copy downstream of `recover_image`, its output reaches
+no metric, and `/api/download/repaired` still serves the honestly-marked image, so
+the fabricated one can never become the artifact you keep. `rho`, the unrecoverable
+count and every PSNR/SSIM still report the gaps the filled picture no longer shows.
+The toggle is hidden entirely when nothing is unrecoverable. `src/recover.py:139-142`
+specified this discipline before the function existed.
+
 Uploads for *verification* must be lossless (PNG/BMP/TIFF, or a PDF carrying one) --
 a JPEG or WebP re-save discards precisely the two bit-planes the watermark occupies,
 so the app refuses with that explanation instead of reporting phantom tampering
@@ -180,3 +198,46 @@ in `payload.py` so the difference is never accidentally load-bearing.
 See the paper's own Limitations subsection (`paper/IEEE_Paper.tex`, Section
 "Comparison, Explainability, and Limitations") for the full, current list --
 it is not duplicated here so it cannot drift out of sync with the paper.
+
+### Measured, not adopted: per-channel block maps
+
+`src/blockmap.py:228-232` binds no `channel` into the map seed, so one permutation
+serves R, G and B. That means a holder block carries a partner's *complete colour*
+descriptor, and recovery of a block is all-or-nothing. Binding channel instead would
+give three independent permutations, so a block is only fully lost when all three of
+its holders die. That was measured rather than argued about, over 21 image/severity
+combinations with real embedding, real pen-stroke scribbles and real detection:
+
+```
+unrecoverable blocks, light scribble        100  ->  3     (98% fewer)
+recovered PSNR, whole image, mean          +12.6 dB, worst +8.4 dB, 21/21 improved
+cost of losing one channel to the fill      0.15 dB on a document,
+                                            4.3 dB on saturated colour (kodim23)
+```
+
+It was **not adopted**, and the reasons are worth recording because two of them are
+not obvious:
+
+1. It loses to a far cheaper option on the aggregate number. Keeping the shared map
+   and simply interpolating the magenta scores **+15.3 dB** mean against the same
+   baseline -- 2.6 dB *better* than three maps, because the shared map already
+   recovers ~86% of flagged blocks in full colour and the interpolator only has to
+   cover the remainder, whereas three maps demote ~40% of blocks to a chroma
+   estimate.
+2. PSNR is measuring the wrong thing on documents, and the pictures disagree with it:
+   interpolation erases glyphs, while a block rebuilt from a surviving channel keeps
+   the real letter shape and only gets the hue wrong. On text, three maps look
+   dramatically better than their score. On smooth photo content the reverse holds --
+   the chroma estimate leaves visible pastel patches that interpolation does not.
+3. It is the most invasive of the options. Recoverability is a *block*-level decision
+   throughout: `detect.py:173` ORs the three channels into one mask before anything
+   downstream sees them, and `recover.py:110-114` derives one `T`/`U`/`R` for all
+   three. Per-channel recovery would need a tri-state model that `rho = 1 - |U|/|T|`
+   has no vocabulary for, a new library column so existing records still recover
+   correctly, and a re-run of the 1,184-row grid with every table and figure redrawn.
+
+So the shipped answer is the cheap one, quarantined as described above, and the
+honest route to a perfect file stays "restore exactly from library". The genuinely
+better long-term fix is neither of these: erasure-coded reference sharing (k-of-n
+descriptor shares instead of a 1:1 partner) degrades gracefully by construction
+rather than patching the all-or-nothing case after the fact.

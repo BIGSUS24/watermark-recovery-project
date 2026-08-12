@@ -460,12 +460,37 @@ function repairStats(d) {
   ].join("");
 }
 
+/* --- cosmetic gap fill ----------------------------------------------------- */
+
+// Both repair panels offer the same toggle, so they share one wiring function --
+// the same reason demo/app.py has a single effective_variant() helper. The toggle
+// is HIDDEN, not merely unchecked, when nothing is unrecoverable: an inpaint
+// switch on an image with no gaps invites the reader to think something was
+// filled in. Nothing here touches the numbers in repairStats -- those come from
+// recover_image's real output, where the gaps are still marked.
+function wireFill(toggleId, rowId, imgId, capId, d) {
+  const row = $(rowId), tog = $(toggleId), img = $(imgId), cap = $(capId);
+  const lost = (d.counts && d.counts.unrecoverable) || 0;
+  const MARKED = "Repaired — magenta hatch marks blocks that could not be recovered";
+  const FILLED = "Repaired, with the unrecoverable gaps interpolated — those pixels are " +
+                 "a guess from their neighbours, not watermark data, and are excluded from " +
+                 "every number below";
+  tog.checked = false;
+  img.src = d.overlay;
+  cap.textContent = lost ? MARKED : "Repaired — every flagged block was recoverable";
+  show(row, lost > 0);
+  tog.onchange = () => {
+    img.src = tog.checked ? d.filled : d.overlay;
+    cap.textContent = tog.checked ? FILLED : MARKED;
+  };
+}
+
 $("repair-btn").addEventListener("click", () => withBusy($("repair-btn"), async () => {
   const st = $("repair-status");
   setStatus(st, "Rebuilding from the hidden backups…", { loading: true });
   try {
     const d = await postJSON("/api/repair", {});
-    $("img-repaired").src = d.overlay;
+    wireFill("fill-toggle", "fill-row", "img-repaired", "repair-caption", d);
     $("repair-stats").innerHTML = repairStats(d);
     show($("repair-out"));
     setStatus(st, "Repair complete.");
@@ -599,7 +624,7 @@ $("v-repair-btn").addEventListener("click", () => withBusy($("v-repair-btn"), as
   setStatus(st, "Rebuilding from the hidden backups…", { loading: true });
   try {
     const d = await postJSON("/api/verify/repair", {});
-    $("v-img-repaired").src = d.overlay;
+    wireFill("v-fill-toggle", "v-fill-row", "v-img-repaired", "v-repair-caption", d);
     $("v-repair-stats").innerHTML = repairStats(d);
     show($("v-repair-out"));
     setStatus(st, "Repair complete — quality measured against the stored original.");

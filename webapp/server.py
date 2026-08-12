@@ -256,6 +256,37 @@ def paint_unrecoverable(img: np.ndarray, unrecoverable_block_mask: np.ndarray, b
     return out
 
 
+def cosmetic_fill(img: np.ndarray, unrecoverable_block_mask: np.ndarray, block: int
+                  ) -> np.ndarray:
+    """Diffuse the marked blocks away from their neighbours. COSMETIC ONLY.
+
+    These pixels have no cryptographic provenance whatsoever. Every other pixel a
+    repair produces came out of a descriptor carried by a block whose tag verified;
+    these came out of an interpolator that guessed from the pixels next door. The
+    scheme's answer for them is "I do not know", and this function paints over that
+    answer for the benefit of a presentation slide.
+
+    So the discipline around it is the whole point, and it is exactly the one
+    src/recover.py:139-142 wrote down before this function existed: it runs on a
+    COPY, downstream of recover_image, and its output reaches no metric. rho,
+    counts["unrecoverable"], psnr_in_region and every CSV column are computed from
+    recover_image's real output, where these blocks are still flat mark_value. A
+    caller cannot accidentally launder this into a result, because nothing measured
+    is ever handed this array.
+
+    The UI labels it, defaults to the magenta marker, and hides the toggle entirely
+    when there is nothing unrecoverable to fill.
+    """
+    out = img.copy()
+    pixel_mask = expand_mask(unrecoverable_block_mask, block).astype(np.uint8)
+    if not pixel_mask.any():
+        return out
+    # cv2 wants BGR and a contiguous buffer; TELEA over a 3px radius, which is
+    # comfortably wider than the 8px blocks being filled.
+    bgr = np.ascontiguousarray(out[:, :, ::-1])
+    return cv2.inpaint(bgr, pixel_mask, 3, cv2.INPAINT_TELEA)[:, :, ::-1].copy()
+
+
 def rect_noise_tamper(img: np.ndarray, y0: int, x0: int, y1: int, x1: int, seed: int
                       ) -> tuple[np.ndarray, np.ndarray]:
     """Full destructive overwrite of an EXACT caller-given rectangle.
@@ -620,6 +651,7 @@ def api_repair():
     return ok(
         repaired=encode_png_data_uri(rec.image),
         overlay=encode_png_data_uri(paint_unrecoverable(rec.image, rec.unrecoverable_mask, block)),
+        filled=encode_png_data_uri(cosmetic_fill(rec.image, rec.unrecoverable_mask, block)),
         rho=rec.rho, counts=rec.counts,
         psnr_in_region=rm["psnr_in_region"], ssim_in_region=rm["ssim_in_region"],
         psnr_whole=rm["psnr_whole"], ssim_whole=rm["ssim_whole"],
@@ -1023,6 +1055,7 @@ def api_verify_repair():
     return ok(
         repaired=encode_png_data_uri(rec.image),
         overlay=encode_png_data_uri(paint_unrecoverable(rec.image, rec.unrecoverable_mask, block)),
+        filled=encode_png_data_uri(cosmetic_fill(rec.image, rec.unrecoverable_mask, block)),
         rho=rec.rho, counts=rec.counts,
         psnr_in_region=rm["psnr_in_region"], ssim_in_region=rm["ssim_in_region"],
         psnr_whole=rm["psnr_whole"], ssim_whole=rm["ssim_whole"],

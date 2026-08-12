@@ -314,6 +314,28 @@ def paint_unrecoverable_magenta(img: np.ndarray, unrecoverable_block_mask: np.nd
     return out
 
 
+def cosmetic_fill(img: np.ndarray, unrecoverable_block_mask: np.ndarray, block: int
+                  ) -> np.ndarray:
+    """Interpolate the marked blocks away. COSMETIC ONLY -- see webapp/server.py's
+    twin for the full argument.
+
+    Short version: these pixels have no cryptographic provenance. Every other pixel
+    in a repair came from a descriptor carried by a block whose tag verified; these
+    came from an interpolator guessing at the neighbours. It runs on a copy,
+    downstream of recover_image, and its output reaches no metric -- rho, the
+    unrecoverable count and every PSNR/SSIM below are computed from recover_image's
+    real output, where these blocks are still flat mark_value.
+    """
+    out = img.copy()
+    if out.ndim == 2:
+        out = cv2.cvtColor(out, cv2.COLOR_GRAY2RGB)
+    px = expand_mask(unrecoverable_block_mask, block).astype(np.uint8)
+    if not px.any():
+        return out
+    bgr = np.ascontiguousarray(out[:, :, ::-1])
+    return cv2.inpaint(bgr, px, 3, cv2.INPAINT_TELEA)[:, :, ::-1].copy()
+
+
 MASK_STAGE_LABELS = [
     "Stage 1 -- raw block flags (pre-refinement)",
     "Stage 2 -- majority-refined block flags",
@@ -755,8 +777,22 @@ def main() -> None:
             disp = rec_result.image
             note = ""
             if rec_result.unrecoverable_mask.sum() > 0:
-                disp = paint_unrecoverable_magenta(rec_result.image, rec_result.unrecoverable_mask, block)
-                note = " -- magenta = could not be repaired (shown honestly, never faked)"
+                # Offered only when there is something to fill: an interpolation
+                # switch on a gapless image invites the audience to believe
+                # something was filled in.
+                fill = st.checkbox(
+                    "Fill the magenta gaps by interpolation (cosmetic only -- guessed "
+                    "from neighbouring pixels, not recovered from the watermark)",
+                    value=False, key="cosmetic_fill")
+                if fill:
+                    disp = cosmetic_fill(rec_result.image, rec_result.unrecoverable_mask, block)
+                    note = (" -- gaps interpolated: those pixels are a guess from their "
+                            "neighbours, not watermark data, and are excluded from every "
+                            "number below")
+                else:
+                    disp = paint_unrecoverable_magenta(rec_result.image,
+                                                       rec_result.unrecoverable_mask, block)
+                    note = " -- magenta = could not be repaired (shown honestly, never faked)"
             st.image(disp, caption=f"Repaired{note}", width="stretch")
 
             gt_mask_px = st.session_state.get("gt_mask_px")
