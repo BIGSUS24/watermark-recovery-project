@@ -11,6 +11,19 @@ marked explicitly unrecoverable if that partner is also flagged. Everything is
 deterministic, keyed, and training-free -- no ML, no GPU. Full methodology,
 notation, and results are in `paper/IEEE_Paper.tex`.
 
+That file pulls its five tables and two figures in from `output/` with `\input`
+and `\includegraphics`, so the paper can never disagree with the committed
+result grid -- but it therefore needs those files alongside it, and anything
+that takes only a single file (a converter, a one-file Overleaf upload) stops at
+`File '../output/tables/imperceptibility.tex' not found`. For that case run
+`python src/make_standalone.py`, which writes `paper/IEEE_Paper_standalone.tex`:
+the same document with every table spliced in verbatim and the figures routed
+through a fallback that draws a labelled placeholder box when the PDF is not
+beside it. Upload or convert that one file alone; drop
+`output/figures/recovery_vs_ratio.pdf` and `qualitative_strip.pdf` next to it if
+you want the two figures rendered rather than boxed. Edit
+`paper/IEEE_Paper.tex`, never the standalone copy, and re-run the script.
+
 Three descriptor variants share that container. **A** keeps 12 zig-zag DCT
 coefficients at a fixed 8 bits each; **B** keeps 2x2 block means; **C** is the
 default, and spends the same 96 bits on 31-34 variable-width coefficient fields
