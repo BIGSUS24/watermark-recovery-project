@@ -11,18 +11,23 @@ marked explicitly unrecoverable if that partner is also flagged. Everything is
 deterministic, keyed, and training-free -- no ML, no GPU. Full methodology,
 notation, and results are in `paper/IEEE_Paper.tex`.
 
-That file pulls its five tables and two figures in from `output/` with `\input`
-and `\includegraphics`, so the paper can never disagree with the committed
-result grid -- but it therefore needs those files alongside it, and anything
-that takes only a single file (a converter, a one-file Overleaf upload) stops at
-`File '../output/tables/imperceptibility.tex' not found`. For that case run
-`python src/make_standalone.py`, which writes `paper/IEEE_Paper_standalone.tex`:
-the same document with every table spliced in verbatim and the figures routed
-through a fallback that draws a labelled placeholder box when the PDF is not
-beside it. Upload or convert that one file alone; drop
-`output/figures/recovery_vs_ratio.pdf` and `qualitative_strip.pdf` next to it if
-you want the two figures rendered rather than boxed. Edit
-`paper/IEEE_Paper.tex`, never the standalone copy, and re-run the script.
+That is the entire paper in one self-contained file -- no companion `.tex`, so it
+uploads or converts as a single file. It used to pull its five tables in with
+`\input{../output/tables/*.tex}`, which meant the printed numbers could never
+disagree with the committed result grid, but also meant anything handed only the
+one file stopped at `File '../output/tables/imperceptibility.tex' not found`.
+The tables are now inlined verbatim instead, each between a marker comment and
+the end of its tabular, and `python src/sync_paper_tables.py` rewrites every one
+of those blocks from the current `output/tables/` files -- so re-run it after
+regenerating the grid and the no-drift guarantee is back without the extra file.
+The script ends in 37 structural checks (every table landed with its numbers,
+environments and braces balance, every `\ref` resolves, every tabular row's cell
+count matches its column spec), which stand in for a compile since the paper is
+built on Overleaf rather than locally.
+
+The two figures are optional: drop `output/figures/recovery_vs_ratio.pdf` and
+`qualitative_strip.pdf` beside the `.tex` to render them, or compile without them
+and each becomes a labelled placeholder box rather than a fatal error.
 
 Three descriptor variants share that container. **A** keeps 12 zig-zag DCT
 coefficients at a fixed 8 bits each; **B** keeps 2x2 block means; **C** is the
