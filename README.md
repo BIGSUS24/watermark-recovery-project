@@ -22,12 +22,48 @@ of those blocks from the current `output/tables/` files -- so re-run it after
 regenerating the grid and the no-drift guarantee is back without the extra file.
 The script ends in 37 structural checks (every table landed with its numbers,
 environments and braces balance, every `\ref` resolves, every tabular row's cell
-count matches its column spec), which stand in for a compile since the paper is
-built on Overleaf rather than locally.
+count matches its column spec).
 
 The two figures are optional: drop `output/figures/recovery_vs_ratio.pdf` and
 `qualitative_strip.pdf` beside the `.tex` to render them, or compile without them
 and each becomes a labelled placeholder box rather than a fatal error.
+
+### Building the PDF and the Word document
+
+```bash
+python src/build_docs.py            # both, from scratch
+python src/build_docs.py --skip-pdf # DOCX only, reusing the last LaTeX .aux
+```
+
+Outputs land in `output/paper/`: `IEEE_Paper.pdf` (15 pages) and
+`IEEE_Paper.docx`. Needs [tectonic](https://tectonic-typesetting.github.io) and
+[pandoc](https://pandoc.org) on `PATH`, or pointed at by `$TECTONIC` / `$PANDOC`.
+Tectonic is a single binary that downloads the TeX packages it needs on first
+run, so there is no TeX distribution to install.
+
+**The PDF is the real thing.** Tectonic compiles the actual `IEEEtran` class, so
+the layout is IEEE's own: US Letter, two columns, the genuine title block and
+section numbering. The build reports the number of overfull boxes and currently
+finds zero.
+
+**The DOCX is a conversion, and the difference is worth stating plainly.** Word
+has no `IEEEtran`, so the format is reconstructed rather than compiled -- IEEE
+page size and margins, a single-column title block over a two-column body, Times
+New Roman at IEEE sizes, centred roman-numeral section headings, italic lettered
+subsections, 8 pt tables (7 pt for the nine-column one), wide tables given
+full-page-width sections the way `table*` does in LaTeX, and figures at column
+width. Cross-references and citation numbers are substituted from the `.aux`
+tectonic just wrote, so the Word file's `(6)`, `Table II` and `[18]` are the same
+numbers the PDF prints rather than an independent renumbering. What it is not is
+byte-equal typesetting: line breaks, hyphenation and float placement are Word's,
+not TeX's. **Submit the PDF; the DOCX is for people who need to edit or comment.**
+
+The build ends in 27 checks over the produced files -- all five tables and both
+figures present, math converted to Word equations, the section break and page
+setup right, no LaTeX macro name left in the text, and the two layout invariants
+that were genuinely wrong at one point: every table's columns must add up to its
+declared width, and no table cell may keep the body's first-line indent, which
+silently narrows a cell's first line and splits numbers like `0.9824` in half.
 
 Three descriptor variants share that container. **A** keeps 12 zig-zag DCT
 coefficients at a fixed 8 bits each; **B** keeps 2x2 block means; **C** is the

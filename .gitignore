@@ -60,3 +60,12 @@ desktop.ini
 *.toc
 paper/*.log
 paper/*.pdf
+
+# --- paper build intermediates ------------------------------------------
+# LaTeX scratch from src/build_docs.py. The .aux is kept on disk because a
+# --skip-pdf DOCX build reads the printed reference numbers out of it, but it is
+# regenerable and not worth committing.
+output/paper/*.aux
+output/paper/*.log
+output/paper/_*.docx
+output/paper/_*.tex
