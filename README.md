@@ -28,15 +28,29 @@ The two figures are optional: drop `output/figures/recovery_vs_ratio.pdf` and
 `qualitative_strip.pdf` beside the `.tex` to render them, or compile without them
 and each becomes a labelled placeholder box rather than a fatal error.
 
-### Building the PDF and the Word document
+### The project synopsis
+
+`paper/Synopsis.tex` is the university project synopsis, a different document for
+a different reader. It is deliberately **not** in IEEEtran: SPPU's Project Work
+Book prescribes A4, single column, Times 12 pt at one-and-a-half spacing, and a
+title page carrying student and guide signatures, none of which fits a two-column
+conference template. It keeps IEEE's numbered `[n]` citations and reference
+format, which the same workbook requires, and carries the sections the rubric
+grades — including *Relevant Mathematics* and *Target Publication Venues*, the two
+SPPU-specific items most groups omit. The IEEE paper is referenced as Annexure A
+rather than duplicated. Every measured number in it comes from the same
+`output/tables/` grid as the paper, so the two cannot disagree.
+
+### Building the PDF and the Word documents
 
 ```bash
-python src/build_docs.py            # both, from scratch
-python src/build_docs.py --skip-pdf # DOCX only, reusing the last LaTeX .aux
+python src/build_docs.py                  # all four files
+python src/build_docs.py --skip-pdf       # DOCX only, reusing the last LaTeX .aux
+python src/build_docs.py --synopsis-only  # just the synopsis
 ```
 
-Outputs land in `output/paper/`: `IEEE_Paper.pdf` (15 pages) and
-`IEEE_Paper.docx`. Needs [tectonic](https://tectonic-typesetting.github.io) and
+Outputs land in `output/paper/`: `IEEE_Paper.pdf` (15 pages) and `IEEE_Paper.docx`,
+plus `Synopsis.pdf` (18 pages) and `Synopsis.docx`. Needs [tectonic](https://tectonic-typesetting.github.io) and
 [pandoc](https://pandoc.org) on `PATH`, or pointed at by `$TECTONIC` / `$PANDOC`.
 Tectonic is a single binary that downloads the TeX packages it needs on first
 run, so there is no TeX distribution to install.

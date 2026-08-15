@@ -24,7 +24,12 @@ on this paper:
 Requires tectonic and pandoc. Paths are read from the environment first
 (TECTONIC / PANDOC), then from PATH, then from the E:\tools install.
 
-Usage:  python src/build_docs.py [--skip-pdf]
+Usage:  python src/build_docs.py [--skip-pdf] [--synopsis-only] [--no-synopsis]
+
+Builds four files into output/paper/: IEEE_Paper.pdf/.docx and
+Synopsis.pdf/.docx. The synopsis is the SPPU-format project synopsis --
+A4, single column, Times 12 pt at one-and-a-half spacing -- built from
+paper/Synopsis.tex.
 """
 import os
 import re
@@ -279,7 +284,11 @@ def style_pPr(spec):
     if "ind" in spec:
         p.append(el("ind", firstLine=spec["ind"]))
     before, after = spec.get("spacing", (0, 0))
-    p.append(el("spacing", before=before, after=after, line=240, lineRule="auto"))
+    # line is in 240ths of a line: 240 = single, 360 = one-and-a-half. A style may
+    # override it, which is how the synopsis gets the 1.5 spacing its format
+    # annexure requires while its captions stay single-spaced.
+    p.append(el("spacing", before=before, after=after,
+                line=spec.get("line", 240), lineRule="auto"))
     return p
 
 
@@ -299,7 +308,13 @@ def style_rPr(spec):
     return r
 
 
-def make_reference_docx(dst: Path):
+def make_reference_docx(dst: Path, styles_spec=None, base_sz=20, base_line=240):
+    """Patch pandoc's default reference.docx into the target house style.
+
+    Defaults are the IEEE paper's (10 pt, single-spaced); the synopsis passes its
+    own spec for 12 pt at one-and-a-half spacing.
+    """
+    styles_spec = STYLES if styles_spec is None else styles_spec
     raw = subprocess.run([PANDOC, "--print-default-data-file", "reference.docx"],
                          capture_output=True).stdout
     src = dst.with_suffix(".src.docx")
@@ -317,15 +332,15 @@ def make_reference_docx(dst: Path):
     for a in ("ascii", "hAnsi", "cs", "eastAsia"):
         f.set(w(a), "Times New Roman")
     rpr.insert(0, f)
-    rpr.append(el("sz", val=20))
-    rpr.append(el("szCs", val=20))
+    rpr.append(el("sz", val=base_sz))
+    rpr.append(el("szCs", val=base_sz))
     ppr = dd.find("w:pPrDefault/w:pPr", NS)
     for child in list(ppr):
         ppr.remove(child)
-    ppr.append(el("spacing", before=0, after=0, line=240, lineRule="auto"))
+    ppr.append(el("spacing", before=0, after=0, line=base_line, lineRule="auto"))
 
     have = {s.get(w("styleId")): s for s in styles.findall("w:style", NS)}
-    for sid, (pspec, rspec) in STYLES.items():
+    for sid, (pspec, rspec) in styles_spec.items():
         st = have.get(sid)
         if st is None:                       # ImageCaption is pandoc-invented
             st = el("style", type="paragraph", styleId=sid)
@@ -354,7 +369,9 @@ def make_reference_docx(dst: Path):
 ROMAN = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"]
 
 
-def sectpr(cols, continuous=False):
+def sectpr(cols, continuous=False, pgsz=None, pgmar=None):
+    pgsz = PGSZ if pgsz is None else pgsz
+    pgmar = PGMAR if pgmar is None else pgmar
     s = el("sectPr")
     if continuous:
         # w:type says how THIS section begins, so it belongs on the two-column body
@@ -362,8 +379,8 @@ def sectpr(cols, continuous=False):
         # block instead and the body still starts on a new page, leaving the title
         # alone on page 1 -- which is exactly the bug this comment replaced.
         s.append(el("type", val="continuous"))
-    s.append(el("pgSz", **PGSZ))
-    s.append(el("pgMar", **PGMAR))
+    s.append(el("pgSz", **pgsz))
+    s.append(el("pgMar", **pgmar))
     s.append(el("cols", num=cols, space=360, equalWidth=1)
              if cols > 1 else el("cols", num=1, space=360))
     s.append(el("docGrid", linePitch=360))
@@ -441,7 +458,7 @@ CHAR_W = 80             # average glyph advance for 8 pt Times, in twips
 PROSE_CAP = 34          # widest a prose column may ask for, in characters
 
 
-def size_table_columns(body):
+def size_table_columns(body, total_override=None):
     """Set every column's width from the longest text in it.
 
     Pandoc writes widths derived from the LaTeX column spec, which spreads them
@@ -473,7 +490,8 @@ def size_table_columns(body):
                     for word in txt.split():
                         floors[i] = max(floors[i], len(word))
                 i += width
-        total_w = FULL_W if cols >= WIDE_COLS else COL_W
+        # the synopsis is single-column, so every table gets the full text width
+        total_w = total_override or (FULL_W if cols >= WIDE_COLS else COL_W)
         # What a column needs is its text plus Word's cell padding -- leaving the
         # padding out is what split "0.9824" over two lines. A prose column (the
         # Notes column of Table IV runs to about a hundred characters) is capped,
@@ -534,7 +552,7 @@ def size_table_columns(body):
     return n
 
 
-def shrink_table_text(body):
+def shrink_table_text(body, wide_sz=14, normal_sz=16):
     """Set table text to IEEE's 8 pt (7 pt for the widest table), and clear the
     paragraph indent inside cells.
 
@@ -547,7 +565,7 @@ def shrink_table_text(body):
     n = 0
     for tblel in body.findall("w:tbl", NS):
         cols = len(tblel.findall("w:tblGrid/w:gridCol", NS))
-        half_points = 14 if cols >= 7 else 16
+        half_points = wide_sz if cols >= 7 else normal_sz
         for p in tblel.iter(w("p")):
             pPr = p.find("w:pPr", NS)
             if pPr is None:
@@ -658,9 +676,258 @@ def postprocess(docx: Path):
                 sized_table_paras=n_small)
 
 
+# ------------------------------------------------------- 6. the synopsis
+# SPPU report style: A4, one-and-a-half spacing, Times 12 pt, mirrored margins
+# (top/bottom 1 in, inside 1.25 in, outside 1 in). Single column throughout --
+# none of the IEEE two-column machinery applies here.
+SYN = ROOT / "paper" / "Synopsis.tex"
+A4 = dict(w=11906, h=16838)
+SYN_MAR = dict(top=1440, right=1440, bottom=1440, left=1800, header=720,
+               footer=720, gutter=0)
+SYN_TEXT_W = A4["w"] - SYN_MAR["left"] - SYN_MAR["right"]      # 8666 twips
+LINE15 = 360                                                    # 1.5 x 240
+SYN_STYLES = {
+    "Normal":         (dict(jc="both", line=LINE15), dict(sz=24)),
+    "BodyText":       (dict(jc="both", ind=432, line=LINE15), dict(sz=24)),
+    "FirstParagraph": (dict(jc="both", ind=432, line=LINE15), dict(sz=24)),
+    "Compact":        (dict(jc="left", line=240), dict(sz=24)),
+    "Title":          (dict(jc="center", spacing=(0, 240)), dict(sz=36, b=1)),
+    "Author":         (dict(jc="center", spacing=(0, 120)), dict(sz=24)),
+    "Abstract":       (dict(jc="both", line=LINE15), dict(sz=24)),
+    "AbstractTitle":  (dict(jc="left", spacing=(240, 120)), dict(sz=28, b=1)),
+    "Heading1":       (dict(jc="left", spacing=(280, 140)), dict(sz=28, b=1)),
+    "Heading2":       (dict(jc="left", spacing=(200, 100)), dict(sz=24, b=1)),
+    "Heading3":       (dict(jc="left", spacing=(160, 80)), dict(sz=24, i=1)),
+    # captions stay single-spaced: 1.5-spaced captions read as body text
+    "Caption":        (dict(jc="center", spacing=(80, 160), line=240), dict(sz=20)),
+    "TableCaption":   (dict(jc="center", spacing=(80, 80), line=240), dict(sz=20)),
+    "ImageCaption":   (dict(jc="center", spacing=(80, 160), line=240), dict(sz=20)),
+    "Bibliography":   (dict(jc="both", line=240), dict(sz=22)),
+}
+
+
+def prep_synopsis(tex):
+    """Make Synopsis.tex digestible by pandoc without changing what it says."""
+    c = {}
+    # the placeholder macro: expand it, so the markers survive into Word
+    tex, c["placeholders"] = re.subn(
+        r"\\PH\{([^}]*)\}", lambda m: r"\textbf{[%s --- PLACEHOLDER]}" % m.group(1), tex)
+
+    # tikz cannot survive pandoc; the diagram is rasterised by the caller
+    arch = FIGDIR / "architecture.png"
+    assert arch.exists(), "run the architecture figure export first"
+    tex, c["tikz"] = re.subn(r"\\begin\{tikzpicture\}.*?\\end\{tikzpicture\}",
+                             lambda m: r"\includegraphics[width=6in]{%s}"
+                             % arch.as_posix(), tex, flags=re.S)
+
+    # Signature rules: \hrulefill and \rule are layout primitives with no Word
+    # equivalent, but the line to sign on has to survive. Literal underscores, not
+    # \underline{\hspace{..}} -- the \hspace strip further down would eat the
+    # spacing and leave an empty underline, which is what happened first time.
+    tex = re.sub(r"\\hrulefill", r"\\_" * 26, tex)
+    tex = re.sub(r"\\rule\{[^}]*\}\{[^}]*\}", r"\\_" * 22, tex)
+
+    # column specifiers pandoc does not parse
+    tex = re.sub(r">\{\\raggedright\\arraybackslash\}", "", tex)
+
+    # spacing and page-furniture commands: no meaning in a flowed Word document
+    tex = re.sub(r"\\(vspace\*?|hspace\*?)\{[^}]*\}", "", tex)
+    tex = re.sub(r"\\(vfill|newpage|clearpage|tableofcontents|maketitle)\b", "", tex)
+    tex = re.sub(r"\\(singlespacing|onehalfspacing|centering|small|large|normalsize|"
+                 r"LARGE|Large|bfseries)\b", "", tex)
+    tex = re.sub(r"\\thispagestyle\{[^}]*\}", "", tex)
+    tex = re.sub(r"\\addcontentsline\{[^}]*\}\{[^}]*\}\{[^}]*\}", "", tex)
+    tex = tex.replace(r"\begin{titlepage}", "").replace(r"\end{titlepage}", "")
+
+    # bibliography -> a numbered list, and \cite -> the same numbers
+    keys = re.findall(r"\\bibitem\{([^}]+)\}", tex)
+    order = {k: str(i + 1) for i, k in enumerate(keys)}
+
+    def cite(m):
+        return ", ".join("[%s]" % order.get(k.strip(), "?")
+                         for k in m.group(1).split(","))
+
+    tex, c["cites"] = re.subn(r"\\cite\{([^}]+)\}", cite, tex)
+
+    def bib(m):
+        items = re.split(r"\\bibitem\{([^}]+)\}", m.group(1))[1:]
+        rows = ["[%s] %s\n" % (order[k], b.strip())
+                for k, b in zip(items[0::2], items[1::2])]
+        return "\\section*{References}\n\n" + "\n".join(rows)
+
+    tex, c["bibliography"] = re.subn(
+        r"\\begin\{thebibliography\}\{[^}]*\}(.*?)\\end\{thebibliography\}",
+        bib, tex, flags=re.S)
+    c["references"] = len(keys)
+    return tex, c
+
+
+def para_text(p):
+    return "".join(t.text or "" for t in p.findall(".//w:t", NS))
+
+
+def front_matter(body, style_of):
+    """Centre the title and certificate pages and put page breaks between them.
+
+    LaTeX does this with \\begin{titlepage} and \\centering, neither of which
+    survives conversion: pandoc emits ordinary justified body paragraphs, so the
+    cover page arrives stretched edge to edge with no page break before the
+    certificate. Everything before the first heading is front matter.
+    """
+    paras = body.findall("w:p", NS)
+    first_head = next((i for i, p in enumerate(paras)
+                       if (style_of(p) or "").startswith("Heading")), len(paras))
+    n_centred = 0
+    for p in paras[:first_head]:
+        pPr = p.find("w:pPr", NS)
+        if pPr is None:
+            pPr = el("pPr")
+            p.insert(0, pPr)
+        for tag in ("ind", "jc"):
+            for old in pPr.findall(f"w:{tag}", NS):
+                pPr.remove(old)
+        ind = el("ind")
+        ind.set(w("firstLine"), "0")
+        ind.set(w("left"), "0")
+        pPr.append(ind)
+        pPr.append(el("jc", val="center"))
+        n_centred += 1
+
+    # a page break before the certificate, and another before the first heading
+    n_breaks = 0
+    # `in`, not `==`: the certificate heading is three lines joined by \\ in the
+    # source, so pandoc emits them as ONE paragraph with breaks inside it.
+    targets = [p for p in paras[:first_head] if "CERTIFICATE" in para_text(p)]
+    if first_head < len(paras):
+        targets.append(paras[first_head])
+    for p in targets:
+        pPr = p.find("w:pPr", NS)
+        if pPr is None:
+            pPr = el("pPr")
+            p.insert(0, pPr)
+        if pPr.find("w:pageBreakBefore", NS) is None:
+            style = pPr.find("w:pStyle", NS)
+            brk = el("pageBreakBefore")
+            if style is None:
+                pPr.insert(0, brk)
+            else:
+                style.addnext(brk)
+            n_breaks += 1
+    return n_centred, n_breaks
+
+
+def postprocess_synopsis(docx: Path):
+    zin = zipfile.ZipFile(docx)
+    doc = etree.fromstring(zin.read("word/document.xml"))
+    body = doc.find("w:body", NS)
+    for old in body.findall("w:sectPr", NS):
+        body.remove(old)
+    body.append(sectpr(1, pgsz=A4, pgmar=SYN_MAR))
+
+    def style_of(p):
+        s = p.find("w:pPr/w:pStyle", NS)
+        return s.get(w("val")) if s is not None else None
+
+    tbl = fig = 0
+    for p in body.findall("w:p", NS):
+        s = style_of(p)
+        if s == "TableCaption":
+            tbl += 1
+            prefix_runs(p, f"Table {tbl}: ")
+        elif s == "ImageCaption":
+            fig += 1
+            prefix_runs(p, f"Figure {fig}: ")
+
+    n_front, n_breaks = front_matter(body, style_of)
+    n_fit = size_table_columns(body, total_override=SYN_TEXT_W)
+    n_small = shrink_table_text(body, wide_sz=20, normal_sz=22)
+
+    with zipfile.ZipFile(docx.with_suffix(".tmp"), "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename == "word/document.xml":
+                data = etree.tostring(doc, xml_declaration=True, encoding="UTF-8",
+                                      standalone=True)
+            zout.writestr(item, data)
+    zin.close()
+    docx.with_suffix(".tmp").replace(docx)
+    return dict(table_captions=tbl, figure_captions=fig, sized_tables=n_fit,
+                sized_table_paras=n_small, centred_front_matter=n_front,
+                page_breaks=n_breaks)
+
+
+def build_synopsis(skip_pdf):
+    print("\n== SYNOPSIS PDF (SPPU report style via tectonic) ==")
+    if skip_pdf:
+        print("  skipped")
+    else:
+        r = subprocess.run([TECTONIC, "-X", "compile", SYN.name, "--outdir",
+                            str(OUTDIR)], cwd=SYN.parent, capture_output=True,
+                           text=True)
+        over = re.findall(r"Overfull \\hbox \(([\d.]+)pt", r.stdout + r.stderr)
+        print(f"  tectonic exit {r.returncode}, {len(over)} overfull boxes")
+        ck(r.returncode == 0, "tectonic compiled the synopsis")
+        ck(not over, "no overfull boxes in the synopsis", sorted(set(over))[:4])
+    pdf = OUTDIR / "Synopsis.pdf"
+    ck(pdf.exists(), "synopsis PDF written",
+       f"{pdf.stat().st_size / 1024:.0f} KB" if pdf.exists() else "missing")
+
+    print("\n== SYNOPSIS DOCX (SPPU report style via pandoc) ==")
+    tex, c = prep_synopsis(SYN.read_text(encoding="utf-8"))
+    print(f"  rewrote: {c['placeholders']} placeholders, {c['tikz']} tikz figure, "
+          f"{c['cites']} cite groups over {c['references']} references")
+    ck(c["tikz"] == 1 and c["bibliography"] == 1 and c["references"] >= 10,
+       "synopsis rewrites applied (SPPU requires at least 10 references)", c)
+
+    work = OUTDIR / "_synopsis_input.tex"
+    work.write_text(tex, encoding="utf-8")
+    ref = OUTDIR / "_report_reference.docx"
+    make_reference_docx(ref, styles_spec=SYN_STYLES, base_sz=24, base_line=LINE15)
+    docx = OUTDIR / "Synopsis.docx"
+    r = subprocess.run([PANDOC, str(work), "-o", str(docx), "--reference-doc", str(ref),
+                        # no --toc: pandoc puts its table of contents at the very
+                        # top, above the cover page, and Word leaves the field
+                        # unpopulated until the reader presses F9. The PDF carries
+                        # a proper one.
+                        "--number-sections",
+                        "--resource-path", f"{SYN.parent}{os.pathsep}{FIGDIR}"],
+                       capture_output=True, text=True)
+    if r.returncode != 0 or r.stderr.strip():
+        print("  pandoc:", (r.stderr or r.stdout).strip()[:1200])
+    ck(r.returncode == 0, "pandoc converted the synopsis")
+    stats = postprocess_synopsis(docx)
+    print(f"  post-processed: {stats}")
+
+    z = zipfile.ZipFile(docx)
+    x = z.read("word/document.xml").decode("utf-8")
+    media = [n for n in z.namelist() if n.startswith("word/media/")]
+    txt = re.sub(r"<[^>]+>", "", x)
+    ck(len(media) == 1, "architecture diagram embedded", media)
+    ck(x.count("<w:tbl>") >= 5, "synopsis tables present", x.count("<w:tbl>"))
+    ck(f'w:w="{A4["w"]}"' in x, "A4 page size")
+    ck('w:num="1"' in x, "single column")
+    ck("PLACEHOLDER" in txt, "placeholder markers survived into Word")
+    ck("tikzpicture" not in x and "hrulefill" not in x and "\\PH{" not in x,
+       "no LaTeX primitives leaked into the synopsis")
+    for needle in ("43.17", "0.9489", "1{,}802{,}240".replace("{,}", ","),
+                   "CERTIFICATE", "Relevant Mathematics"):
+        ck(needle in txt, f"synopsis content present: {needle}")
+    z.close()
+    for tmp in (work, ref):
+        tmp.unlink(missing_ok=True)
+    print(f"\n{pdf.relative_to(ROOT)}   "
+          f"{pdf.stat().st_size / 1024:.0f} KB")
+    print(f"{docx.relative_to(ROOT)}  {docx.stat().st_size / 1024:.0f} KB")
+
+
 # --------------------------------------------------------------------- main
 def main():
     skip_pdf = "--skip-pdf" in sys.argv
+    if "--synopsis-only" in sys.argv:
+        build_synopsis(skip_pdf)
+        print(f"\n{len(fails)} failures")
+        print("SYNOPSIS OK" if not fails else "FAIL: " + "; ".join(fails))
+        return 1 if fails else 0
     print("== PDF (real IEEEtran via tectonic) ==")
     if skip_pdf:
         print("  skipped")
@@ -748,7 +1015,11 @@ def main():
 
     print(f"\n{pdf.relative_to(ROOT)}   {pdf.stat().st_size / 1024:.0f} KB")
     print(f"{docx.relative_to(ROOT)}  {docx.stat().st_size / 1024:.0f} KB")
-    print(f"{len(fails)} failures")
+
+    if "--no-synopsis" not in sys.argv:
+        build_synopsis(skip_pdf)
+
+    print(f"\n{len(fails)} failures")
     print("DOCS OK" if not fails else "FAIL: " + "; ".join(fails))
     return 1 if fails else 0
 
