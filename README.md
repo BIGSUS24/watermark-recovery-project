@@ -71,9 +71,15 @@ does this too — its own sample references reach x = 571 pt on a page whose rig
 margin is 540 pt. `--fit-margins` pulls all of that back inside instead, which
 looks tidier but no longer matches what everyone else submits.
 
+Every topic starts on its own page — the cover, the seven header fields, the
+abstract, and each of the nine numbered sections — via `w:pageBreakBefore` rather
+than typed page breaks, so the breaks survive an edit. Spacer paragraphs that
+would have landed in front of a break are dropped, which is what otherwise
+produces a blank page.
+
 Four fields are left as `[TO BE FILLED]` — project group ID, the student roll
 numbers and names, the guide's name, and the probable completion date — plus the
-blank team-member table the template provides. The build ends in 49 checks that
+blank team-member table the template provides. The build ends in 52 checks that
 cover the things which have silently broken before: bold lost from headings, the
 template's own negative indents printing outside the 1 in margins, table columns
 that no longer add up to the text block, and OOXML child-element ordering, which

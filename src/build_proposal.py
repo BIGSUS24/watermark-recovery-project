@@ -678,11 +678,16 @@ def build_body(body, has_fig: bool, rel_id: str, fit: bool):
             set_text(p, subs[t])
         out.append(p)
 
-    def head1(s):
-        out.append(clone(P_NUM1, s))
+    def page_break(p):
+        put(p.find(W + "pPr"), "pageBreakBefore", PPR_ORDER)
+        return p
+
+    def head1(s, brk=False):
+        p = clone(P_NUM1, s)
+        out.append(page_break(p) if brk else p)
 
     def head8(s):
-        p = clone(P_NUM8, s)
+        p = page_break(clone(P_NUM8, s))
         if fit:
             pPr = p.find(W + "pPr")
             sp = pPr.find(W + "spacing")
@@ -704,7 +709,7 @@ def build_body(body, has_fig: bool, rel_id: str, fit: bool):
         out.append(clone(P_BODY, ""))
 
     # ---- items 1-7 -----------------------------------------------------------
-    head1("Project Group ID : " + PH)
+    head1("Project Group ID : " + PH, brk=True)
     head1("Title of the project : " + TITLE)
     head1("Domain : Information Security and Digital Image Forensics "
           "(Multimedia Security)")
@@ -723,7 +728,7 @@ def build_body(body, has_fig: bool, rel_id: str, fit: bool):
     out.append(clone(P_BODY, ""))
 
     # ---- abstract and keywords ----------------------------------------------
-    out.append(clone(P_ABS, "Abstract (150 words)"))
+    out.append(page_break(clone(P_ABS, "Abstract (150 words)")))
     out.append(clone(P_BODY, ABSTRACT))
     out.append(clone(P_BODY, ""))
     out.append(clone(P_ABS, "Keywords (5 to 10) :"))
@@ -785,7 +790,26 @@ def build_body(body, has_fig: bool, rel_id: str, fit: bool):
     for _ in range(3):
         out.append(clone(P_BODY, ""))
     out.append(copy.deepcopy(P_SIGN))
-    return out
+
+    # A spacer paragraph in front of a page break is a blank page: the cover pads
+    # itself out with empties, and every section ends with one. Drop those.
+    def blank(el):
+        return (etree.QName(el).localname == "p"
+                and not text_of(el).strip()
+                and not el.findall(".//" + W + "drawing"))
+
+    kept, dropped = [], 0
+    for el in reversed(out):
+        breaks_next = bool(kept) and (
+            etree.QName(kept[0]).localname == "p"
+            and kept[0].find(W + "pPr/" + W + "pageBreakBefore") is not None)
+        if breaks_next and blank(el):
+            dropped += 1
+            continue
+        kept.insert(0, el)
+    if dropped:
+        print(f"  dropped {dropped} spacer paragraphs that would have made blank pages")
+    return kept
 
 
 def main() -> int:
@@ -909,6 +933,14 @@ def check(docx: Path, fit: bool) -> int:
         want(head in full, f"section present: {head}")
 
     want("Name & Sign of Student" in full, "signature line present")
+    breaks = [text_of(p).strip()[:28] for p in paras
+              if p.find(W + "pPr/" + W + "pageBreakBefore") is not None]
+    want(len(breaks) == 11, f"11 topics start a new page ({len(breaks)}: {breaks})")
+    idx = {id(p): i for i, p in enumerate(paras)}
+    orphan = [text_of(paras[idx[id(p)] - 1])[:20] for p in paras
+              if p.find(W + "pPr/" + W + "pageBreakBefore") is not None
+              and idx[id(p)] and not text_of(paras[idx[id(p)] - 1]).strip()]
+    want(not orphan, f"no blank paragraph sits in front of a page break ({orphan})")
     words = len(ABSTRACT.split())
     want(140 <= words <= 165, f"abstract is ~150 words (it is {words})")
     want("'" not in full.replace("&#39;", ""), "no straight apostrophes")
@@ -954,8 +986,17 @@ def check(docx: Path, fit: bool) -> int:
         want(not tneg, f"no negative table indent survives ({len(tneg)} do)")
     else:
         # exactly as issued: the template's own out-of-margin values are intact
-        # 20 cover paragraphs (left -540, right -630) + 18 references (right -630)
-        want(len(neg) == 38, f"template's negative indents kept ({len(neg)} of 38)")
+        # The template's own out-of-margin values are the point of this mode:
+        # every reference paragraph and the whole cover must still carry them.
+        refs = [p for p in paras if text_of(p).strip().startswith("[")
+                and "TO BE FILLED" not in text_of(p)]
+        want(len(refs) == 18 and all(
+            (p.find(W + "pPr/" + W + "ind") is not None
+             and p.find(W + "pPr/" + W + "ind").get(W + "right") == "-630")
+            for p in refs), f"all 18 references keep ind right=-630 ({len(refs)} found)")
+        cover = [p for p in paras[:20] if p.find(W + "pPr/" + W + "ind") is not None
+                 and p.find(W + "pPr/" + W + "ind").get(W + "left") == "-540"]
+        want(len(cover) >= 15, f"cover keeps ind left=-540 ({len(cover)} paragraphs)")
         want(len(tneg) == 2, f"template's 2 negative table indents kept ({len(tneg)})")
     plan = tbls[1]
     cols = [int(c.get(W + "w")) for c in plan.iter(W + "gridCol")]
