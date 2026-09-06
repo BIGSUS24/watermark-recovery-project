@@ -57,13 +57,23 @@ itself to rather than reporting finished measurements. The synopsis and the pape
 report what was measured; this document says what is being attempted.
 
 ```bash
-python src/build_proposal.py              # docx + pdf
-python src/build_proposal.py --skip-pdf   # docx only
+python src/build_proposal.py                # docx + pdf, template exactly as issued
+python src/build_proposal.py --fit-margins  # ... but nothing outside the margins
+python src/build_proposal.py --skip-pdf     # docx only
 ```
+
+By default the template's own measurements are kept exactly as the department
+issued them, including the places where they print outside the margins the
+document itself declares: the reference paragraphs carry `ind right="-630"` and
+both tables carry `tblInd="-318"`, and the upper-roman list right-aligns its
+label so `VIII.` grows leftward. Rendering the untouched template confirms it
+does this too — its own sample references reach x = 571 pt on a page whose right
+margin is 540 pt. `--fit-margins` pulls all of that back inside instead, which
+looks tidier but no longer matches what everyone else submits.
 
 Four fields are left as `[TO BE FILLED]` — project group ID, the student roll
 numbers and names, the guide's name, and the probable completion date — plus the
-blank team-member table the template provides. The build ends in 51 checks that
+blank team-member table the template provides. The build ends in 49 checks that
 cover the things which have silently broken before: bold lost from headings, the
 template's own negative indents printing outside the 1 in margins, table columns
 that no longer add up to the text block, and OOXML child-element ordering, which

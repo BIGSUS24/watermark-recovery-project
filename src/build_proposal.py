@@ -9,7 +9,13 @@ byte-for-byte what the department asked for.
 The voice throughout is a proposal -- what the system *will* do and how it *will* be
 built -- not a report of finished work.
 
-    python src/build_proposal.py            # docx + pdf
+By default the template's own measurements are left exactly as issued, even where
+they print outside the margins the section declares (the department's reference
+paragraphs carry ind right="-630", and both tables carry tblInd="-318"). Pass
+--fit-margins to pull those back inside the 1 in margins instead.
+
+    python src/build_proposal.py                # docx + pdf, template exactly as issued
+    python src/build_proposal.py --fit-margins  # ... but nothing outside the margins
     python src/build_proposal.py --skip-pdf
 
 Writes output/paper/Project_Proposal.docx and .pdf.
@@ -625,12 +631,13 @@ def plan_table(proto_tbl, proto_p):
     tbl.append(row(header, ("Ph.", "Activity", "Deliverable"), True))
     for ph, act, deliv in PLAN:
         tbl.append(row(blank, (ph, act, deliv), False))
+    fit_table(tbl)      # this table is ours, not the template's: pin it either way
     return tbl
 
 
 # ----------------------------------------------------------------------------- build
 
-def build_body(body, has_fig: bool, rel_id: str):
+def build_body(body, has_fig: bool, rel_id: str, fit: bool):
     """Return the list of elements that will replace the template's body."""
     kids = [el for el in body if etree.QName(el).localname in ("p", "tbl")]
 
@@ -648,9 +655,10 @@ def build_body(body, has_fig: bool, rel_id: str):
     P_BODY = kids[find("pervasive Smartphone")]
     P_SUB = kids[find("Design an algorithm for IMU")]
     P_REF = copy.deepcopy(kids[find("SignalGuru")])
-    ref_ind = P_REF.find(W + "pPr/" + W + "ind")
-    if ref_ind is not None:                 # template has right="-630": 31 pt of
-        ref_ind.set(W + "right", "0")       # reference text printed into the margin
+    if fit:                                 # template has right="-630": 31 pt of
+        ref_ind = P_REF.find(W + "pPr/" + W + "ind")   # reference text printed
+        if ref_ind is not None:                        # into the right margin
+            ref_ind.set(W + "right", "0")
     P_SIGN = kids[find("Name & Sign of Student")]
     assert etree.QName(TBL).localname == "tbl"
 
@@ -675,11 +683,14 @@ def build_body(body, has_fig: bool, rel_id: str):
 
     def head8(s):
         p = clone(P_NUM8, s)
-        pPr = p.find(W + "pPr")
-        sp = pPr.find(W + "spacing")
-        if sp is not None:
-            sp.set(W + "after", "120")
-        put(pPr, "ind", PPR_ORDER, left="720", hanging="120")
+        if fit:
+            pPr = p.find(W + "pPr")
+            sp = pPr.find(W + "spacing")
+            if sp is not None:
+                sp.set(W + "after", "120")
+            # The level right-aligns its label, so a wide numeral ("VIII.") grows
+            # leftward from (left - hanging); a small hanging moves that anchor right.
+            put(pPr, "ind", PPR_ORDER, left="720", hanging="120")
         out.append(p)
 
     def body_ps(items):
@@ -780,6 +791,8 @@ def build_body(body, has_fig: bool, rel_id: str):
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--skip-pdf", action="store_true")
+    ap.add_argument("--fit-margins", action="store_true",
+                    help="pull the template's own out-of-margin indents back inside")
     args = ap.parse_args()
 
     assert TEMPLATE.exists(), f"missing template: {TEMPLATE}"
@@ -813,22 +826,24 @@ def main() -> int:
     doc = etree.fromstring(parts["word/document.xml"])
     body = doc.find(W + "body")
     sect = body.find(W + "sectPr")          # keeps Letter size and 1 in margins
-    new = build_body(body, has_fig, rel_id)
+    new = build_body(body, has_fig, rel_id, args.fit_margins)
     for el in list(body):
         body.remove(el)
     for el in new:
         body.append(el)
     for tbl in body.iter(W + "tbl"):
         for p in tbl.iter(W + "p"):
-            zero_indent(p)
-        ti = tbl.find(W + "tblPr/" + W + "tblInd")
-        if ti is not None and int(ti.get(W + "w", "0")) < 0:
-            ti.set(W + "w", "0")
-        fit_table(tbl)
-    for ind in body.iter(W + "ind"):
-        for side in ("left", "right", "start", "end"):
-            if int(ind.get(W + side, "0")) < 0:
-                ind.set(W + side, "0")
+            zero_indent(p)      # cell paragraphs must not inherit a first-line indent
+        if args.fit_margins:
+            ti = tbl.find(W + "tblPr/" + W + "tblInd")
+            if ti is not None and int(ti.get(W + "w", "0")) < 0:
+                ti.set(W + "w", "0")
+            fit_table(tbl)
+    if args.fit_margins:
+        for ind in body.iter(W + "ind"):
+            for side in ("left", "right", "start", "end"):
+                if int(ind.get(W + side, "0")) < 0:
+                    ind.set(W + side, "0")
     if sect is not None:
         body.append(sect)
 
@@ -850,12 +865,14 @@ def main() -> int:
         assert pdf.exists(), "LibreOffice produced no PDF"
         print(f"  wrote {pdf.relative_to(ROOT)}  {pdf.stat().st_size // 1024} KB")
 
-    return check(docx)
+    print(f"  template geometry: "
+          f"{'pulled inside the margins' if args.fit_margins else 'exactly as issued'}")
+    return check(docx, args.fit_margins)
 
 
 # ----------------------------------------------------------------------------- check
 
-def check(docx: Path) -> int:
+def check(docx: Path, fit: bool) -> int:
     """Assert the things that have silently broken before."""
     z = zipfile.ZipFile(docx)
     doc = etree.fromstring(z.read("word/document.xml"))
@@ -931,15 +948,21 @@ def check(docx: Path) -> int:
          "numbered headings are bold")
     neg = [p for p in body.iter(W + "ind")
            if any(int(p.get(W + k, "0")) < 0 for k in ("left", "right", "start", "end"))]
-    want(not neg, f"no negative indent survives ({len(neg)} do)")
-    want(all(int(t.get(W + "w", "0")) >= 0 for t in body.iter(W + "tblInd")),
-         "no negative table indent survives")
-    for i, tbl in enumerate(tbls):
-        cols = [int(c.get(W + "w")) for c in tbl.iter(W + "gridCol")]
-        want(sum(cols) == 9360, f"table {i} columns sum to the text block "
-                                f"({sum(cols)} twips)")
-        want(tbl.find(W + "tblPr/" + W + "tblLayout") is not None,
-             f"table {i} has a fixed layout")
+    tneg = [t for t in body.iter(W + "tblInd") if int(t.get(W + "w", "0")) < 0]
+    if fit:
+        want(not neg, f"no negative indent survives ({len(neg)} do)")
+        want(not tneg, f"no negative table indent survives ({len(tneg)} do)")
+    else:
+        # exactly as issued: the template's own out-of-margin values are intact
+        # 20 cover paragraphs (left -540, right -630) + 18 references (right -630)
+        want(len(neg) == 38, f"template's negative indents kept ({len(neg)} of 38)")
+        want(len(tneg) == 2, f"template's 2 negative table indents kept ({len(tneg)})")
+    plan = tbls[1]
+    cols = [int(c.get(W + "w")) for c in plan.iter(W + "gridCol")]
+    want(sum(cols) == 9360, f"plan table columns sum to the text block "
+                            f"({sum(cols)} twips)")
+    want(plan.find(W + "tblPr/" + W + "tblLayout") is not None,
+         "plan table has a fixed layout")
 
     misordered = 0
     for parent, order in ((W + "pPr", PPR_ORDER), (W + "tblPr", TBLPR_ORDER)):
