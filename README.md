@@ -41,6 +41,34 @@ SPPU-specific items most groups omit. The IEEE paper is referenced as Annexure A
 rather than duplicated. Every measured number in it comes from the same
 `output/tables/` grid as the paper, so the two cannot disagree.
 
+### The departmental project proposal
+
+`output/paper/Project_Proposal.docx` is the document the department actually
+collects. It is not written from scratch: the department supplies the layout as a
+Word file, which is kept verbatim at `paper/Proposal_template.docx`, and
+`src/build_proposal.py` fills it in by editing that file's own XML. Every
+paragraph in the result is cloned from a paragraph the template already contains,
+so the fonts, sizes, list numbering and indents are the department's rather than
+an approximation of them.
+
+It is written as a proposal — what the system *will* do and how it *will* be
+built — so the Expected Outcomes section states the targets the project holds
+itself to rather than reporting finished measurements. The synopsis and the paper
+report what was measured; this document says what is being attempted.
+
+```bash
+python src/build_proposal.py              # docx + pdf
+python src/build_proposal.py --skip-pdf   # docx only
+```
+
+Four fields are left as `[TO BE FILLED]` — project group ID, the student roll
+numbers and names, the guide's name, and the probable completion date — plus the
+blank team-member table the template provides. The build ends in 51 checks that
+cover the things which have silently broken before: bold lost from headings, the
+template's own negative indents printing outside the 1 in margins, table columns
+that no longer add up to the text block, and OOXML child-element ordering, which
+LibreOffice tolerates and Word does not.
+
 ### Building the PDF and the Word documents
 
 ```bash
