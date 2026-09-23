@@ -72,8 +72,19 @@ def _recover_reverse(out: np.ndarray, det: DetectResult, block: int, variant: st
 
 def recover_image(received: np.ndarray, det: DetectResult, block: int = 8,
                   variant: str = "A", mark_unrecoverable: bool = True,
-                  mark_value: int = 0, _iter_order: str = "forward") -> RecoverResult:
-    """Reconstruct flagged blocks from their partner-held descriptors; mark the rest unrecoverable."""
+                  mark_value: int = 0, skip_refinement_only: bool = False,
+                  _iter_order: str = "forward") -> RecoverResult:
+    """Reconstruct flagged blocks from their partner-held descriptors; mark the rest unrecoverable.
+
+    `skip_refinement_only` (#32, default False = today's behaviour): a block whose OWN
+    tag MATCHED (raw_mask == 0) but that refine_mask's isolated-negative fill still
+    flagged is not evidence of tampering -- it is a hole-filling guess. Recovering it
+    unconditionally overwrites verified-authentic content. But the fill exists to close
+    real holes inside a genuinely tampered region where a smooth inpainter reproduced
+    the original MSB planes (see tamper.py's tamper_inpaint_removal docstring), so
+    skipping it is not a strict improvement -- it is measured on the full grid, not
+    switched on by default, per #32's spec.
+    """
     if received.dtype != np.uint8:
         raise ValueError(f"recover_image requires uint8 input, got dtype {received.dtype}")
     if received.ndim == 3 and received.shape[2] == 1:
@@ -102,7 +113,12 @@ def recover_image(received: np.ndarray, det: DetectResult, block: int = 8,
     # it would return all zeros and silently fabricate flat grey content while
     # reporting success. The data flow makes that unreachable, not merely avoided by
     # caller discipline.
-    d = det.block_mask.ravel()          # (K,) FROZEN -- never mutated below
+    d = det.block_mask.ravel().copy()   # (K,) FROZEN below this point -- never mutated again
+    if skip_refinement_only:
+        # Own tag matched (raw==0) but refine_mask flagged it anyway -> treat as
+        # authentic: not recovered, not marked unrecoverable, left exactly as received.
+        only_refinement = d.astype(bool) & ~det.raw_mask.ravel().astype(bool)
+        d[only_refinement] = 0
 
     # PROPERTY 2: the mask is frozen. `avail` is ONE vectorized expression evaluated
     # before any write below, so whether a partner is judged tampered can never depend
@@ -248,6 +264,21 @@ if __name__ == "__main__":
     marked_c = rec_fc.image[r0 * 8:(r0 + 1) * 8, c0 * 8:(c0 + 1) * 8, :]
     assert np.all(marked_c == 0)  # all 3 channels uniformly marked, no fringing
     print(f"(f) colour: region PSNR={region_psnr_c:.2f} dB, uniform marking across channels -- OK")
+
+    # (g) #32 skip_refinement_only: a block flagged ONLY by refinement (own tag
+    # matched, so raw_mask==0 there) must be left exactly as received when the switch
+    # is on, and recovered/marked as before (today's default) when it is off.
+    det0 = detect_image(wm, KEY, ID, 8, "A")  # nothing flagged: block_mask == raw_mask == 0
+    forced_ref = np.zeros((Rg, Cg), dtype=np.uint8); forced_ref.ravel()[i] = 1
+    raw_matched = np.zeros((Rg, Cg), dtype=np.uint8)  # own tag "matched" everywhere
+    det_ref = det0._replace(block_mask=forced_ref, raw_mask=raw_matched)
+    rec_on = recover_image(wm, det_ref, 8, "A", skip_refinement_only=True)
+    rec_off = recover_image(wm, det_ref, 8, "A", skip_refinement_only=False)
+    untouched = rec_on.image[r0 * 8:(r0 + 1) * 8, c0 * 8:(c0 + 1) * 8]
+    assert np.array_equal(untouched, wm[r0 * 8:(r0 + 1) * 8, c0 * 8:(c0 + 1) * 8])
+    assert rec_on.counts["tampered"] == 0 and rec_on.rho == 1.0
+    assert rec_off.counts["tampered"] == 1  # default behaviour: unchanged from before #32
+    print("(g) skip_refinement_only leaves refinement-only-flagged blocks untouched -- OK")
 
     print("recover.py self-check OK")
 

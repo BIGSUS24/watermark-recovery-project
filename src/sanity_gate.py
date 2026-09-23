@@ -30,10 +30,16 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CSV = ROOT / "output" / "runs.csv"
 REPORT_PATH = ROOT / "output" / "sanity_gate_report.txt"
 
-EXPECTED_TOTAL = 1184
-EXPECTED_MAIN = 768
+# #38/#40: main grid is now ("A", "C") x 7 ratios (was ("A", "B") x 3), and variant B
+# moved into the ablation block at MAIN_BLOCK on the full corpus (see
+# run_experiments.iter_ablation_cells) instead of vanishing -- so ablation grew from
+# "8 USC-SIPI x 4 classes x ratios, variant A, block=4" alone to that PLUS "32 images x
+# 4 classes x ratios, variant B, block=8". 32 images x 4 classes x 7 ratios x 2 variants
+# = 1792 main; 32 x 2 x 5 keys = 320 null; (8 + 32) x 4 x 7 = 1120 ablation; 3232 total.
+EXPECTED_TOTAL = 3232
+EXPECTED_MAIN = 1792
 EXPECTED_NULL = 320
-EXPECTED_ABLATION = 96
+EXPECTED_ABLATION = 1120
 
 
 # ---------------------------------------------------------------------------
@@ -116,20 +122,98 @@ def check_null_fp(null_rows: list[dict]) -> dict:
     return _r("null false-positive blocks (sum)", "hard", "PASS" if total_fp == 0 else "FAIL", detail)
 
 
+def _ratio_strs(tamper_rows: list[dict]) -> list[str]:
+    """Distinct tamper_ratio_nominal values actually present in `tamper_rows`, sorted
+    numerically -- the single source both check_rho_monotone and
+    check_psnr_whole_unmarked_bands derive their ratio list from, so RATIOS changing
+    (#40: 3 points -> 7) can never leave a hardcoded literal behind again."""
+    return sorted({r["tamper_ratio_nominal"] for r in tamper_rows
+                  if r["tamper_ratio_nominal"] != ""}, key=float)
+
+
 def check_rho_monotone(tamper_rows: list[dict]) -> dict:
+    """rho must be non-increasing as the tamper ratio grows -- checked over EVERY adjacent
+    pair in whatever ratio set is actually present in the CSV, not three hardcoded points.
+
+    #40 changed RATIOS from 3 coarse points to 7; hardcoding "0.10"/"0.25"/"0.50" literals
+    here meant this check would SKIP forever the moment 0.25 stopped existing in the data
+    -- silently, since SKIP isn't FAIL. Deriving the ratio list from the rows themselves
+    means this can never go stale again when RATIOS changes, and checking every adjacent
+    pair (not just the endpoints via three corners) is a strictly stronger statement --
+    with 7 points it actually tests the shape of the collapse curve, not three samples
+    of it.
+    """
+    name = "rho monotonicity: non-increasing across every adjacent tamper ratio"
+    ratio_strs = _ratio_strs(tamper_rows)
+    if len(ratio_strs) < 2:
+        return _r(name, "hard", "SKIP",
+                  f"need >=2 distinct tamper ratios to check monotonicity, found {ratio_strs}")
     means = {}
-    for ratio_s in ("0.10", "0.25", "0.50"):
-        sub = [r for r in tamper_rows if r["tamper_ratio_nominal"] == ratio_s]
-        agg = _agg(sub, "recoverability_rate")
+    for ratio_s in ratio_strs:
+        agg = _agg([r for r in tamper_rows if r["tamper_ratio_nominal"] == ratio_s],
+                   "recoverability_rate")
         if agg is None:
-            return _r("rho monotonicity: rho(0.10)>=rho(0.25)>=rho(0.50)", "hard", "SKIP",
-                      f"missing ratio {ratio_s} tamper rows")
+            return _r(name, "hard", "SKIP", f"missing ratio {ratio_s} tamper rows")
         means[ratio_s] = agg["mean"]
-    ok = means["0.10"] >= means["0.25"] >= means["0.50"]
-    detail = (f"rho(0.10)={means['0.10']:.4f} rho(0.25)={means['0.25']:.4f} "
-              f"rho(0.50)={means['0.50']:.4f}")
-    return _r("rho monotonicity: rho(0.10)>=rho(0.25)>=rho(0.50)", "hard",
-              "PASS" if ok else "FAIL", detail)
+    violations = [(a, b) for a, b in zip(ratio_strs, ratio_strs[1:]) if means[a] < means[b]]
+    trace = " ".join(f"rho({r})={means[r]:.4f}" for r in ratio_strs)
+    if violations:
+        bad = "; ".join(f"rho({a})={means[a]:.4f} < rho({b})={means[b]:.4f}" for a, b in violations)
+        detail = f"VIOLATED at {bad} -- {trace}"
+    else:
+        detail = trace
+    return _r(name, "hard", "PASS" if not violations else "FAIL", detail)
+
+
+# The 0.50 floor was originally 18 dB, extrapolated from SYNTHETIC fixtures that
+# measured ~23 dB. Real corpus measurement gives 17.8 dB, and the code is not at
+# fault: the value follows arithmetically from the measured rho at this ratio.
+# At alpha=0.50 with rho ~ 0.55, roughly 45% of the tampered region is
+# unrecoverable and therefore still holds attacker content -- about 22.5% of the
+# whole frame. Charging that region a typical tamper error of ~100 DN gives a
+# predicted whole-image PSNR near 14.5 dB, so 17.8 dB is BETTER than the
+# arithmetic leads one to expect, not worse.
+# Independent evidence the pipeline is sound at this ratio: block precision is
+# 1.000, imperceptibility sits inside its band, and rho matches the theoretical
+# collapse. So the band was mis-estimated from synthetic content; it is corrected
+# here to the measured reality with margin, NOT widened to make a bad run pass.
+# ponytail: floor set from our own measurement, not the literature's whole-image
+# figures -- those come from reference-sharing schemes that degrade gracefully and
+# are not comparable at this ratio (see the paper's Recovery Behaviour discussion).
+#
+# #40 grew RATIOS from 3 points to 7 (0.10 ... 0.70); these three entries are the
+# ONLY ones with real measured evidence behind them. A ratio present in the data with
+# no entry here must not silently PASS (no band = no judgement) or silently SKIP
+# indistinguishably from "no data at all" -- see check_psnr_whole_unmarked_bands,
+# which reports the measured mean anyway and says plainly that the band is pending.
+PSNR_WHOLE_UNMARKED_BANDS: dict[str, tuple[float, float]] = {
+    "0.10": (28, 40), "0.25": (22, 36), "0.50": (13, 32),
+}
+
+
+def check_psnr_whole_unmarked_bands(tamper_rows: list[dict]) -> list[dict]:
+    """One check per tamper ratio actually present in the data. A ratio with a real band
+    in PSNR_WHOLE_UNMARKED_BANDS is judged PASS/FAIL as before; a ratio without one
+    (every new #40 point until Phase C measures it) reports its measured mean -- so the
+    gap is visible in the report -- with an explicit "no calibrated band yet" detail,
+    never a bare "no matching rows yet" that reads the same as missing data.
+    """
+    out = []
+    for ratio_s in _ratio_strs(tamper_rows):
+        name = f"psnr_whole_unmarked mean @ ratio {ratio_s}"
+        sub = [r for r in tamper_rows if r["tamper_ratio_nominal"] == ratio_s]
+        band = PSNR_WHOLE_UNMARKED_BANDS.get(ratio_s)
+        if band is not None:
+            out.append(_band_check(name, _agg(sub, "psnr_whole_unmarked"), *band, " dB"))
+            continue
+        agg = _agg(sub, "psnr_whole_unmarked")
+        if agg is None:
+            out.append(_r(name, "hard", "SKIP", "no matching rows yet"))
+        else:
+            out.append(_r(name, "hard", "SKIP",
+                          f"mean={agg['mean']:.4f} dB (n={agg['n']}, skipped={agg['skipped']}) "
+                          "-- NO CALIBRATED BAND YET, set after Phase C"))
+    return out
 
 
 def check_rho_finite(rows: list[dict]) -> dict:
@@ -202,9 +286,13 @@ def _block_group(row: dict) -> str:
     if row["condition"] == "null":
         return "null"
     bs = int(row["block_size"])
-    if bs == MAIN_BLOCK:
+    # #38: variant B no longer has a main-grid slot -- block_size alone can't tell a
+    # main-grid (A/C) row from a variant-B ablation row any more, since B's ablation
+    # cells deliberately run at MAIN_BLOCK too (see run_experiments.iter_ablation_cells).
+    # block=ABLATION_BLOCK is unambiguous either way; block=MAIN_BLOCK needs the variant.
+    if bs == MAIN_BLOCK and row["recovery_variant"] != "B":
         return "main"
-    if bs == ABLATION_BLOCK:
+    if bs in (MAIN_BLOCK, ABLATION_BLOCK):
         return "ablation"
     return "unknown"
 
@@ -229,8 +317,12 @@ def _missing_cells(rows: list[dict]) -> dict[str, tuple[int, list]]:
     found_null = {(r["image_name"], r["recovery_variant"], int(r["key_id"]))
                   for r in rows if _block_group(r) == "null"}
 
-    expected_abl = {(n, c, ra) for n in usc_names for c in classes for ra in ratio_strs}
-    found_abl = {(r["image_name"], r["tamper_class"], r["tamper_ratio_nominal"])
+    # #38: ablation is now two sub-blocks with a variant field to tell them apart --
+    # the block-size ablation (USC-SIPI only, block=4, variant A) and the variant-B
+    # ablation (full corpus, block=MAIN_BLOCK, variant B).
+    expected_abl = ({(n, c, ra, "A") for n in usc_names for c in classes for ra in ratio_strs}
+                    | {(n, c, ra, "B") for n in names for c in classes for ra in ratio_strs})
+    found_abl = {(r["image_name"], r["tamper_class"], r["tamper_ratio_nominal"], r["recovery_variant"])
                  for r in rows if _block_group(r) == "ablation"}
 
     out = {}
@@ -257,7 +349,7 @@ def check_row_counts(rows: list[dict]) -> dict:
     for group, (n_missing, sample) in missing.items():
         if n_missing:
             lines.append(f"{group}: {n_missing} grid cells missing (e.g. {sample})")
-    return _r("row counts vs expected grid (main 768 + null 320 + ablation 96 = 1184)",
+    return _r("row counts vs expected grid (main 1792 + null 320 + ablation 1120 = 3232)",
               "structural", "PASS" if ok else "FAIL", "; ".join(lines))
 
 
@@ -351,16 +443,28 @@ def run_checks(csv_path: Path = DEFAULT_CSV) -> tuple[bool, list[dict]]:
         check_schema_pairing(csv_path),
     ]
 
-    for variant, lo, hi in (("A", 42.8, 43.6), ("B", 43.9, 44.6)):
+    # ponytail: these three bands were measured on the OLD main grid (plain-replace
+    # embedding, variants A and B) and are now doubly stale -- #27 (LSB shifting) moved
+    # every wm_psnr up by roughly +1.3-1.5 dB (independently re-measured on the full
+    # 32-image corpus at +1.98 to +2.37 dB, see Phase B's report), and #38 swapped the
+    # main grid's second variant from B to C, which has its own descriptor and its own
+    # true band. Widened here just enough that stale-but-plausible Phase-B data cannot
+    # spuriously FAIL; this is NOT a measured bound -- the "(PROVISIONAL)" tag on every
+    # name below is load-bearing, not decoration, so a PASS here is never mistaken for
+    # a calibrated one in the printed report. Re-tighten from the real Phase C (A, C)
+    # grid, using the per-image corpus numbers already measured in Phase B as a start.
+    for variant in VARIANTS:
         v_rows = [r for r in main_rows if r["recovery_variant"] == variant]
-        results.append(_band_check(f"wm_psnr mean (variant {variant})", _agg(v_rows, "wm_psnr"),
-                                    lo, hi, " dB"))
-    for variant, hi in (("A", 44.30), ("B", 44.70)):
+        results.append(_band_check(f"wm_psnr mean (variant {variant}) [PROVISIONAL band]",
+                                    _agg(v_rows, "wm_psnr"), 42.0, 47.0, " dB"))
+    for variant in VARIANTS:
         v_rows = [r for r in main_rows if r["recovery_variant"] == variant]
-        results.append(_max_check(f"wm_psnr max (variant {variant})", v_rows, "wm_psnr", hi))
-    for variant in ("A", "B"):
+        results.append(_max_check(f"wm_psnr max (variant {variant}) [PROVISIONAL band]",
+                                  v_rows, "wm_psnr", 49.0))
+    for variant in VARIANTS:
         v_rows = [r for r in main_rows if r["recovery_variant"] == variant]
-        results.append(_min_check(f"wm_ssim min (variant {variant})", v_rows, "wm_ssim", 0.96))
+        results.append(_min_check(f"wm_ssim min (variant {variant}) [PROVISIONAL band]",
+                                  v_rows, "wm_ssim", 0.96))
 
     results.append(check_null_fp(null_rows))
     results.append(_min_mean_check("block_precision mean (all tamper rows)",
@@ -368,25 +472,9 @@ def run_checks(csv_path: Path = DEFAULT_CSV) -> tuple[bool, list[dict]]:
     results.append(_min_mean_check("block_recall mean (all tamper rows)",
                                     _agg(tamper_rows, "block_recall"), 0.97))
 
-    # The 0.50 floor was originally 18 dB, extrapolated from SYNTHETIC fixtures that
-    # measured ~23 dB. Real corpus measurement gives 17.8 dB, and the code is not at
-    # fault: the value follows arithmetically from the measured rho at this ratio.
-    # At alpha=0.50 with rho ~ 0.55, roughly 45% of the tampered region is
-    # unrecoverable and therefore still holds attacker content -- about 22.5% of the
-    # whole frame. Charging that region a typical tamper error of ~100 DN gives a
-    # predicted whole-image PSNR near 14.5 dB, so 17.8 dB is BETTER than the
-    # arithmetic leads one to expect, not worse.
-    # Independent evidence the pipeline is sound at this ratio: block precision is
-    # 1.000, imperceptibility sits inside its band, and rho matches the theoretical
-    # collapse. So the band was mis-estimated from synthetic content; it is corrected
-    # here to the measured reality with margin, NOT widened to make a bad run pass.
-    # ponytail: floor set from our own measurement, not the literature's whole-image
-    # figures -- those come from reference-sharing schemes that degrade gracefully and
-    # are not comparable at this ratio (see the paper's Recovery Behaviour discussion).
-    for ratio_s, lo, hi in (("0.10", 28, 40), ("0.25", 22, 36), ("0.50", 13, 32)):
-        sub = [r for r in tamper_rows if r["tamper_ratio_nominal"] == ratio_s]
-        results.append(_band_check(f"psnr_whole_unmarked mean @ ratio {ratio_s}",
-                                    _agg(sub, "psnr_whole_unmarked"), lo, hi, " dB"))
+    # See PSNR_WHOLE_UNMARKED_BANDS / check_psnr_whole_unmarked_bands above for the
+    # 0.50-floor provenance and the #40 no-band-yet handling.
+    results.extend(check_psnr_whole_unmarked_bands(tamper_rows))
 
     results.append(_band_check("psnr_in_region mean (all tamper rows, all ratios)",
                                 _agg(tamper_rows, "psnr_in_region"), 22, 36, " dB"))
@@ -491,7 +579,7 @@ def _selfcheck() -> None:
     passed, results = run_checks(empty_path)
     assert passed is False
     by_name = {r["name"]: r for r in results}
-    assert by_name["row counts vs expected grid (main 768 + null 320 + ablation 96 = 1184)"]["status"] == "FAIL"
+    assert by_name["row counts vs expected grid (main 1792 + null 320 + ablation 1120 = 3232)"]["status"] == "FAIL"
     assert all(r["status"] == "SKIP" for r in results if r["severity"] == "hard")
     print("(a) header-only CSV: no crash, structural FAIL, all hard checks SKIP -- OK")
 
@@ -503,7 +591,7 @@ def _selfcheck() -> None:
                   psnr_whole_marked=22.0, recoverability_rate=0.90),
         _fake_row(run_id="g2", tamper_ratio_nominal="0.50", psnr_whole_unmarked=24.0,
                   psnr_whole_marked=18.0, recoverability_rate=0.75),
-        _fake_row(run_id="g3", recovery_variant="B", wm_psnr=44.2, wm_ssim=0.985,
+        _fake_row(run_id="g3", recovery_variant="C", wm_psnr=44.2, wm_ssim=0.985,
                   tamper_ratio_nominal="0.10", psnr_whole_unmarked=34.0, psnr_whole_marked=25.0),
         _fake_row(run_id="g4", condition="null", tamper_class="", tamper_ratio_nominal="",
                   tamper_ratio_achieved="", n_tampered_px=0, n_tampered_blocks=0,
@@ -515,13 +603,53 @@ def _selfcheck() -> None:
     _write_csv(good_path, good_rows)
     passed, results = run_checks(good_path)
     by_name = {r["name"]: r for r in results}
-    assert by_name["wm_psnr mean (variant A)"]["status"] == "PASS"
-    assert by_name["wm_psnr mean (variant B)"]["status"] == "PASS"
+    assert by_name["wm_psnr mean (variant A) [PROVISIONAL band]"]["status"] == "PASS"
+    assert by_name["wm_psnr mean (variant C) [PROVISIONAL band]"]["status"] == "PASS"
     assert by_name["null false-positive blocks (sum)"]["status"] == "PASS"
-    assert by_name["rho monotonicity: rho(0.10)>=rho(0.25)>=rho(0.50)"]["status"] == "PASS"
+    mono_name = "rho monotonicity: non-increasing across every adjacent tamper ratio"
+    assert by_name[mono_name]["status"] == "PASS"
     assert by_name["psnr_whole_marked <= psnr_whole_unmarked (per row)"]["status"] == "PASS"  # soft now
+    # all three ratios present (0.10/0.25/0.50) have real bands -- nothing unbanded here.
+    assert by_name["psnr_whole_unmarked mean @ ratio 0.10"]["status"] == "PASS"
+    assert "NO CALIBRATED BAND" not in by_name["psnr_whole_unmarked mean @ ratio 0.10"]["detail"]
     assert passed is False  # row-count structural check still fails on 5 rows -- correct
     print("(b) clean small slice: hard checks with data PASS, gate still FAIL on row count -- OK")
+
+    # (b2) #40 follow-up: a ratio with real data but NO calibrated band (e.g. 0.20, which
+    # PSNR_WHOLE_UNMARKED_BANDS has no entry for) must report its measured mean and say so
+    # explicitly -- never a bare "no matching rows yet" (that phrase means something else:
+    # no data at all) and never a silent PASS.
+    unbanded_rows = good_rows + [
+        _fake_row(run_id="g5", tamper_ratio_nominal="0.20", psnr_whole_unmarked=29.0,
+                  psnr_whole_marked=20.0, recoverability_rate=0.93),
+    ]
+    unbanded_path = scratch / "sanity_selfcheck_unbanded.csv"
+    _write_csv(unbanded_path, unbanded_rows)
+    _, results_ub = run_checks(unbanded_path)
+    by_name_ub = {r["name"]: r for r in results_ub}
+    r020 = by_name_ub["psnr_whole_unmarked mean @ ratio 0.20"]
+    assert r020["status"] == "SKIP"
+    assert "NO CALIBRATED BAND YET" in r020["detail"] and "mean=29.0000" in r020["detail"]
+    # 0.10/0.25/0.50 still get real bands even with a 4th, unbanded ratio in the mix.
+    assert by_name_ub["psnr_whole_unmarked mean @ ratio 0.10"]["status"] == "PASS"
+    print("(b2) ratio with data but no calibrated band reports its mean explicitly, not "
+         "silently -- OK")
+
+    # (b3) a genuine monotonicity violation must FAIL and NAME the offending pair, not
+    # just say "FAIL" -- this is what makes the report actionable instead of a puzzle.
+    violated_rows = [
+        _fake_row(run_id="v0", tamper_ratio_nominal="0.10", recoverability_rate=0.70),
+        _fake_row(run_id="v1", tamper_ratio_nominal="0.25", recoverability_rate=0.90),  # rose!
+        _fake_row(run_id="v2", tamper_ratio_nominal="0.50", recoverability_rate=0.50),
+    ]
+    violated_path = scratch / "sanity_selfcheck_violated.csv"
+    _write_csv(violated_path, violated_rows)
+    _, results_v = run_checks(violated_path)
+    by_name_v = {r["name"]: r for r in results_v}
+    mono_v = by_name_v[mono_name]
+    assert mono_v["status"] == "FAIL"
+    assert "0.10" in mono_v["detail"] and "0.25" in mono_v["detail"] and "VIOLATED" in mono_v["detail"]
+    print("(b3) monotonicity violation FAILs and names the offending ratio pair -- OK")
 
     # (c) inject deliberate defects: a null false positive, and enough marked>unmarked
     # rows to exceed the soft check's RATE threshold.

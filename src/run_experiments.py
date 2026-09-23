@@ -3,9 +3,14 @@
 Reads the 32-image corpus from samples/manifest.csv (never by globbing a directory --
 see samples/fetch_corpus.py). Runs three grid blocks:
 
-    main:      32 images x 4 tamper classes x 3 ratios x 2 variants, block=8, key 0  (768 rows)
-    null:      32 images x 2 variants x 5 keys, NO tamper applied,   block=8         (320 rows)
-    ablation:  8 USC-SIPI x 4 classes x 3 ratios, variant A, block=4, key 0           (96 rows)
+    main:      32 images x 4 tamper classes x 7 ratios x 2 variants (A, C), block=8,
+               key 0                                                              (1792 rows)
+    null:      32 images x 2 variants (A, C) x 5 keys, NO tamper applied, block=8   (320 rows)
+    ablation:  8 USC-SIPI x 4 classes x 7 ratios, variant A, block=4, key 0          (224 rows)
+             + 32 images x 4 classes x 7 ratios, variant B, block=8, key 0          (896 rows)
+               -- #38: B (2x2 block-mean descriptor) is measurably inferior to A/C and no
+               longer occupies a main-grid slot, but its numbers must not simply vanish, so
+               it runs here on the exact main-grid geometry instead.        (1120 rows total)
 
 CORRECTNESS REQUIREMENTS (each closes a way to fabricate a result -- commented again at
 the call sites below):
@@ -57,7 +62,7 @@ from pathlib import Path
 
 import numpy as np
 
-from detect import detect_image, expand_mask
+from detect import detect_image, expand_mask, refinement_flagged_count
 from embed import embed_image, load_image, save_image
 from metrics import (aggregate_by, confusion_counts, image_metrics, load_runs_csv,
                      loc_scores, msb_preserved_miss_blocks, recovery_metrics)
@@ -70,8 +75,10 @@ SAMPLES_DIR = ROOT / "samples"
 MANIFEST_PATH = SAMPLES_DIR / "manifest.csv"
 OUTPUT_DIR = ROOT / "output"
 
-RATIOS = (0.10, 0.25, 0.50)
-VARIANTS = ("A", "B")
+RATIOS = (0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70)  # #40: 3 coarse points hid the
+# collapse cliff between 25% and 50% -- seven points map it.
+VARIANTS = ("A", "C")  # #38: C is what the app actually ships as its default; B is
+# measurably inferior and demoted to an ablation-only block (see iter_ablation_cells).
 MAIN_BLOCK = 8
 ABLATION_BLOCK = 4
 N_KEYS = 5
@@ -100,7 +107,7 @@ CSV_FIELDS = [
     "psnr_whole_marked", "psnr_whole_unmarked", "ssim_whole_marked",
     "n_tampered_blocks", "n_unrecoverable_blocks", "n_tampered_px", "n_unrecoverable_px",
     "n_coincidental_unchanged_px", "n_msb_preserved_miss_blocks",
-    "n_false_positive_blocks", "n_blocks_total",
+    "n_false_positive_blocks", "n_blocks_total", "n_refinement_flagged",
     "elapsed_ms", "timestamp_utc",
 ]
 
@@ -222,23 +229,26 @@ def _blocks_msb_allch(img: np.ndarray, block: int) -> np.ndarray:
 
 _W_KEYS = _W_SAMPLES = _W_SPLICE_SRC = _W_RAW_CACHE = _W_EMBED_CACHE = None
 _W_SEED_BASE = _W_QUAL_NAME = None
+_W_SKIP_REFINEMENT_ONLY = False
 
 
-def _worker_init(keys, samples, splice_src, raw_cache, embed_cache, seed_base, qual_name):
+def _worker_init(keys, samples, splice_src, raw_cache, embed_cache, seed_base, qual_name,
+                 skip_refinement_only=False):
     """Runs once per worker PROCESS at pool startup, not per task -- this is what makes the
     precomputed embed_cache shared instead of re-sent (or re-embedded) per cell."""
     global _W_KEYS, _W_SAMPLES, _W_SPLICE_SRC, _W_RAW_CACHE, _W_EMBED_CACHE
-    global _W_SEED_BASE, _W_QUAL_NAME
+    global _W_SEED_BASE, _W_QUAL_NAME, _W_SKIP_REFINEMENT_ONLY
     _W_KEYS, _W_SAMPLES, _W_SPLICE_SRC = keys, samples, splice_src
     _W_RAW_CACHE, _W_EMBED_CACHE = raw_cache, embed_cache
     _W_SEED_BASE, _W_QUAL_NAME = seed_base, qual_name
+    _W_SKIP_REFINEMENT_ONLY = skip_refinement_only
 
 
 def _worker_compute(index: int, cell: dict, run_id: str) -> tuple[int, dict]:
     """Picklable per-task entry point. `index` is the cell's position in the caller's
     deterministic cell order, carried through purely so results can be sorted back into it."""
     row = compute_row(cell, run_id, _W_KEYS, _W_SAMPLES, _W_SPLICE_SRC, _W_RAW_CACHE,
-                      _W_EMBED_CACHE, _W_SEED_BASE, _W_QUAL_NAME)
+                      _W_EMBED_CACHE, _W_SEED_BASE, _W_QUAL_NAME, _W_SKIP_REFINEMENT_ONLY)
     return index, row
 
 
@@ -285,7 +295,8 @@ def _drain_ready(pending_by_idx: dict[int, dict], next_write: int) -> tuple[list
 def _run_parallel(pending: list[tuple[dict, str]], writer, f, keys: list[bytes],
                   samples: list[dict], splice_src: dict[int, int], raw_cache: dict,
                   embed_cache: dict, seed_base: int, qual_name: str, total: int,
-                  n_skipped: int, t_start: float, log_every: int, jobs: int) -> int:
+                  n_skipped: int, t_start: float, log_every: int, jobs: int,
+                  skip_refinement_only: bool = False) -> int:
     """Dispatch `pending` (already resume-filtered, in deterministic cell order) to a process
     pool. embed_cache must already hold everything the cells need (_precompute_embed_cache)
     before this is called. Progress logs on completion order (unavoidable with a pool), but
@@ -299,7 +310,7 @@ def _run_parallel(pending: list[tuple[dict, str]], writer, f, keys: list[bytes],
     n_done = 0
     with ProcessPoolExecutor(max_workers=jobs, initializer=_worker_init,
                              initargs=(keys, samples, splice_src, raw_cache, embed_cache,
-                                       seed_base, qual_name)) as ex:
+                                       seed_base, qual_name, skip_refinement_only)) as ex:
         futures = [ex.submit(_worker_compute, i, cell, run_id)
                    for i, (cell, run_id) in enumerate(pending)]
         for fut in as_completed(futures):
@@ -352,6 +363,15 @@ def iter_ablation_cells(samples: list[dict]):
                 yield {"condition": "tamper", "block_group": "ablation", "sample": s,
                        "tamper_class": tamper_class, "ratio": ratio, "variant": "A",
                        "block": ABLATION_BLOCK, "key_id": MAIN_KEY_ID}
+    # #38: variant B no longer has a main-grid slot (see VARIANTS), but its numbers
+    # must not simply vanish -- run it on the exact geometry the main grid used to run
+    # it at (full corpus, block=8) as an ablation-only block instead.
+    for s in samples:
+        for tamper_class in TAMPER_FNS:
+            for ratio in RATIOS:
+                yield {"condition": "tamper", "block_group": "ablation", "sample": s,
+                       "tamper_class": tamper_class, "ratio": ratio, "variant": "B",
+                       "block": MAIN_BLOCK, "key_id": MAIN_KEY_ID}
 
 
 # --------------------------------------------------------------------------
@@ -468,7 +488,7 @@ def _now_iso() -> str:
 
 def compute_row(cell: dict, run_id: str, keys: list[bytes], samples: list[dict],
                 splice_src: dict[int, int], raw_cache: dict, embed_cache: dict,
-                seed_base: int, qual_name: str) -> dict:
+                seed_base: int, qual_name: str, skip_refinement_only: bool = False) -> dict:
     """Embed (cached) -> [tamper] -> detect -> recover -> score -> one CSV row."""
     t0 = time.perf_counter()
     s = cell["sample"]
@@ -513,7 +533,12 @@ def compute_row(cell: dict, run_id: str, keys: list[bytes], samples: list[dict],
     # only for scoring, below, and are never passed to recover_image). Feeding ground
     # truth into recovery would silently convert this whole experiment into an oracle-
     # localization measurement and invalidate every recovery number.
-    rec = recover_image(received, det, block=block, variant=variant)
+    rec = recover_image(received, det, block=block, variant=variant,
+                        skip_refinement_only=skip_refinement_only)
+
+    # #32: measured unconditionally regardless of the switch above, so both recovery
+    # behaviours can be compared on one grid -- see recover_image's docstring.
+    n_refinement_flagged = refinement_flagged_count(det.raw_mask, det.block_mask)
 
     score = _score_and_recover(wm, received, det, rec, gt_block, gt_px, block)
 
@@ -542,6 +567,7 @@ def compute_row(cell: dict, run_id: str, keys: list[bytes], samples: list[dict],
         **score,
         "n_coincidental_unchanged_px": n_coincidental,
         "n_msb_preserved_miss_blocks": n_msb_preserved,
+        "n_refinement_flagged": n_refinement_flagged,
         "elapsed_ms": elapsed_ms,
         "timestamp_utc": _now_iso(),
     }
@@ -570,7 +596,7 @@ def load_completed_run_ids(csv_path: Path) -> set[str]:
 def run_grid(cells: list[dict], csv_path: Path, keys: list[bytes], samples: list[dict],
             splice_src: dict[int, int], raw_cache: dict, embed_cache: dict,
             seed_base: int, qual_name: str, resume: bool = True, log_every: int = 25,
-            jobs: int = 1) -> tuple[int, int, int]:
+            jobs: int = 1, skip_refinement_only: bool = False) -> tuple[int, int, int]:
     """Compute every cell, skipping ones already in csv_path when resume=True.
 
     Header written only if csv_path did not already exist; every row reaches disk as soon
@@ -602,7 +628,7 @@ def run_grid(cells: list[dict], csv_path: Path, keys: list[bytes], samples: list
                     n_skipped += 1
                     continue
                 row = compute_row(cell, run_id, keys, samples, splice_src, raw_cache,
-                                  embed_cache, seed_base, qual_name)
+                                  embed_cache, seed_base, qual_name, skip_refinement_only)
                 writer.writerow(row)
                 f.flush()
                 n_done += 1
@@ -624,7 +650,7 @@ def run_grid(cells: list[dict], csv_path: Path, keys: list[bytes], samples: list
                                     raw_cache, embed_cache)
             n_done = _run_parallel(pending, writer, f, keys, samples, splice_src, raw_cache,
                                    embed_cache, seed_base, qual_name, total, n_skipped,
-                                   t_start, log_every, jobs)
+                                   t_start, log_every, jobs, skip_refinement_only)
     return n_done, n_skipped, total
 
 
@@ -669,6 +695,13 @@ def _print_final_summary(csv_path: Path) -> None:
             print(f"  ratio={ratio_s}: rho mean={rho_r[k]['mean']:.4f} (n={rho_r[k]['n']})  "
                   f"psnr_whole_unmarked mean={psnr_r[k]['mean']:.2f} dB (n={psnr_r[k]['n']})")
 
+        # #32: how often the isolated-negative fill invents a flag on a block whose own
+        # tag matched -- recover_image overwrites this content by default (see its
+        # skip_refinement_only parameter / --skip-refinement-only-recovery).
+        n_ref = sum(int(r["n_refinement_flagged"]) for r in tamper_rows)
+        n_flagged = sum(int(r["n_tampered_blocks"]) for r in tamper_rows)
+        print(f"\nn_refinement_flagged (tamper rows): {n_ref} of {n_flagged} flagged blocks")
+
     n_fp = sum(int(r["n_false_positive_blocks"]) for r in null_rows)
     n_blk = sum(int(r["n_blocks_total"]) for r in null_rows)
     print(f"\nNull condition: {len(null_rows)} rows, false-positive blocks = {n_fp} / {n_blk} block checks")
@@ -698,6 +731,12 @@ def parse_args() -> argparse.Namespace:
                         f"for (default: {QUALITATIVE_IMAGE_DEFAULT!r})")
     p.add_argument("--selfcheck", action="store_true",
                    help="run the internal self-check (no corpus/network needed) and exit")
+    p.add_argument("--skip-refinement-only-recovery", action="store_true",
+                   help="#32: do not recover blocks flagged only by refine_mask's "
+                        "neighbourhood fill (own tag matched) -- default off, matching "
+                        "today's behaviour; n_refinement_flagged in runs.csv is always "
+                        "populated regardless of this flag, so both behaviours can be "
+                        "compared on one grid")
     return p.parse_args()
 
 
@@ -730,7 +769,8 @@ def main() -> None:
         ]
         done, skipped, total = run_grid(cells, csv_path, keys, samples, splice_src,
                                           raw_cache, embed_cache, args.seed_base, qual_name,
-                                          resume=not args.restart, jobs=args.jobs)
+                                          resume=not args.restart, jobs=args.jobs,
+                                          skip_refinement_only=args.skip_refinement_only_recovery)
         print(f"\n--quick: {done} computed, {skipped} skipped, {total} cells, "
               f"{time.perf_counter() - t_start:.1f}s wall-clock")
         _print_final_summary(csv_path)
@@ -744,7 +784,8 @@ def main() -> None:
         print(f"\n=== {g}: {len(cells)} cells ===")
         done, skipped, total = run_grid(cells, csv_path, keys, samples, splice_src,
                                           raw_cache, embed_cache, args.seed_base, qual_name,
-                                          resume=not args.restart, jobs=args.jobs)
+                                          resume=not args.restart, jobs=args.jobs,
+                                          skip_refinement_only=args.skip_refinement_only_recovery)
         grand_done += done; grand_skipped += skipped; grand_total += total
 
     elapsed = time.perf_counter() - t_start

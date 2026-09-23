@@ -17,7 +17,39 @@ from metrics import image_metrics
 from payload import (bits_to_lsb_pairs, block_tags, budget, coerce_key,
                      crop_to_blocks, encode_descriptor, from_blocks, msb, to_blocks)
 
-PSNR_BOUND = 44.15  # analytical maximum for full-entropy 2-LSB embedding (see self-check)
+PSNR_BOUND = 44.15  # analytical max for full-entropy 2-LSB PLAIN replacement (pre-#27
+                    # baseline; see self-check). #27's LSB shifting is specifically
+                    # designed to beat this, so a measured psnr above it is now expected,
+                    # not a bug signal -- see the shifted self-check bounds below instead.
+
+
+def _shift_lsb_pairs(orig: np.ndarray, target: np.ndarray) -> np.ndarray:
+    """#27 AuSR1-style LSB shifting: the nearest uint8 value carrying `target` in its low
+    2 bits, vs. plain replacement's `msb(orig) | target` (always exactly right but always
+    IN the same quantization window as `orig`).
+
+    Two candidates only: `in_window` (the historical value: same window as `orig`,
+    always valid since msb(orig) <= 252 and target <= 3) and `out_window`, the same low
+    bits one window over, in whichever direction that is closer. `out_window` wins only
+    when it is STRICTLY closer -- algebraically that is exactly the case where `target`
+    and orig's own low bits sit diagonally opposite in the 4-value window
+    (|target - r| == 3, also the case plain replacement moves the pixel furthest) --
+    AND landing there stays inside [0, 255]. A tie (|target - r| == 2: both directions
+    cost 2) and a clamp collision (out_window would leave [0, 255], which only happens
+    in the bottom or top quantization window of the whole 0..255 range) both fall back
+    to `in_window`: a tie buys nothing by moving, and at the clamp there is nowhere to
+    go. This is also why `in_window` needs no bounds check of its own before the
+    fallback -- it is always valid, by construction.
+    """
+    orig = orig.astype(np.int16)
+    target = target.astype(np.int16)
+    r = orig & 3
+    in_window = (orig & 0xFC) | target
+    diff = target - r                                # -3..3
+    out_window = in_window - 4 * np.sign(diff)        # the other direction, one window over
+    d_in = np.abs(diff)
+    use_out = (4 - d_in < d_in) & (out_window >= 0) & (out_window <= 255)
+    return np.where(use_out, out_window, in_window).astype(np.uint8)
 
 
 def embed_image(img: np.ndarray, key: bytes | str, image_id: bytes | str,
@@ -54,8 +86,15 @@ def embed_image(img: np.ndarray, key: bytes | str, image_id: bytes | str,
     planes = [img] if greyscale else [img[:, :, c] for c in range(3)]
     out = []
     n_clipped = 0
+    # #27: tag_pixels is the boundary between the two halves of every block's payload.
+    # Pixels [0, tag_pixels) carry the block's own tag; pixels [tag_pixels, B*B) carry
+    # the descriptor it holds for its partner (bits_to_lsb_pairs maps bit-pair t to
+    # pixel t -- see that function's docstring -- and payload is [tag_bits, desc_bits]
+    # concatenated, so this split is exact).
+    tag_pixels = tag_bits // 2
     for ch, plane in enumerate(planes):
-        bmsb = msb(to_blocks(plane, block))  # (K, B, B), 2 LSBs already zero
+        raw_blocks = to_blocks(plane, block)     # (K, B, B) untouched original pixels
+        bmsb = msb(raw_blocks)                   # (K, B, B), 2 LSBs already zero
         # Descriptor FIRST, then the tag that binds it. Order matters: the tag must
         # cover the descriptor bits this block physically carries, or those 96 of 128
         # payload bits are unauthenticated and an attacker can destroy every recovery
@@ -68,14 +107,41 @@ def embed_image(img: np.ndarray, key: bytes | str, image_id: bytes | str,
         # at i (blockmap.py: minv[i] = index of the block whose descriptor is STORED IN
         # block i). detect.py reads the mirror image of this line with m.
         carried = desc[minv]
-        tags = block_tags(bmsb, key_b, iid, (H, W), block, ch, variant, tag_bits,
+        carried_pairs = bits_to_lsb_pairs(carried)  # (K, desc_bits/2) values 0..3
+
+        # #27 LSB SHIFTING. block_tags hashes blocks_msb.tobytes() WHOLE (every pixel's
+        # own MSB, not just the ones carrying the tag), so if ANY pixel in the block
+        # moved into a different quantization window, a clean re-read would recompute a
+        # different bmsb than the one the tag was built from and fail its own
+        # authentication -- "verifies at embed time, fails on a clean re-read", the
+        # exact failure mode to avoid. That rules out shifting the tag-carrying pixels:
+        # their target bits ARE the tag, so letting them move would make the hash
+        # depend on its own output (compute the tag to know the pixels, compute the
+        # pixels to know the tag). The descriptor-carrying pixels have no such problem
+        # -- their target bits come from ANOTHER block's descriptor, already fixed --
+        # so: shift those first (against the true original pixel value, not bmsb),
+        # fold the result into "the MSB this block will actually store", hash THAT, and
+        # only then plain-replace the tag pixels on top of it. Since the tag pixels'
+        # slice of bmsb_final is untouched by the shift, that plain replace is exactly
+        # the historical in-window write and provably cannot move them -- not merely
+        # asked not to.
+        flat_raw = raw_blocks.reshape(-1, block * block)
+        desc_shifted = _shift_lsb_pairs(flat_raw[:, tag_pixels:], carried_pairs)
+        bmsb_flat = bmsb.reshape(-1, block * block).copy()
+        bmsb_flat[:, tag_pixels:] = desc_shifted & np.uint8(0xFC)
+        bmsb_final = bmsb_flat.reshape(bmsb.shape)
+
+        tags = block_tags(bmsb_final, key_b, iid, (H, W), block, ch, variant, tag_bits,
                           carried_desc=carried)
-        payload = np.concatenate([tags, carried], axis=1)  # (K, cap)
-        pairs = bits_to_lsb_pairs(payload)  # (K, B*B) values 0..3
-        # No clipping needed anywhere: MSB(x) <= 252 (msb() zeroed the 2 LSBs) and
-        # pair <= 3, so MSB(x) | pair <= 255 always. This is why embedding is exactly
-        # invertible on the MSB plane -- no np.clip, no saturation, ever.
-        wm_blocks = bmsb | pairs.reshape(-1, block, block).astype(np.uint8)
+        tag_pairs = bits_to_lsb_pairs(tags)  # (K, tag_pixels) values 0..3
+        # No clipping needed anywhere: MSB(x) <= 252 and pair <= 3, so MSB(x) | pair <=
+        # 255 always -- true for the tag pixels here exactly as it always was.
+        tag_vals = bmsb_flat[:, :tag_pixels] | tag_pairs
+
+        final_flat = np.empty_like(bmsb_flat)
+        final_flat[:, :tag_pixels] = tag_vals
+        final_flat[:, tag_pixels:] = desc_shifted
+        wm_blocks = final_flat.reshape(bmsb.shape)
         out.append(from_blocks(wm_blocks, (H, W), block))
 
     # Colour: each channel gets its OWN full payload (own tags, own descriptors), not
@@ -87,9 +153,16 @@ def embed_image(img: np.ndarray, key: bytes | str, image_id: bytes | str,
     # needing a reversible colour transform.
     wm = out[0] if greyscale else np.stack(out, axis=-1)
 
-    # The keystone property, kept in production, not behind a debug flag: embedding
-    # must not disturb a single MSB bit.
-    assert np.array_equal(msb(wm), msb(img))
+    # The keystone property, kept in production, not behind a debug flag -- updated for
+    # #27. Plain replacement never moved a pixel's MSB projection at all, so this used
+    # to be exact equality. LSB shifting deliberately lets a DESCRIPTOR pixel cross into
+    # the immediately adjacent quantization window (see _shift_lsb_pairs); TAG pixels
+    # never move (see the per-channel loop above), so the bound is one window (4), not
+    # zero. This is only the distortion-magnitude half of the old assertion -- the real
+    # keystone check, that a clean re-read authenticates every block, is Assertion 1 in
+    # test_e2e.py's test_keystone(), which is exactly what exercises the shift-vs-tag
+    # interaction this function relies on.
+    assert np.max(np.abs(msb(wm).astype(np.int16) - msb(img).astype(np.int16))) <= 4
 
     psnr, ssim = image_metrics(img, wm)
     info = {
@@ -153,6 +226,8 @@ def _synthetic_natural(n: int) -> np.ndarray:
 
 
 if __name__ == "__main__":
+    from detect import detect_image  # local: avoids a module-level cycle risk for callers
+
     KEY = b"embed-selfcheck-key"
     img = _synthetic_natural(128)
 
@@ -162,29 +237,33 @@ if __name__ == "__main__":
                 wm, info = embed_image(I, KEY, b"selfcheck", B, variant)
                 assert wm.shape == I.shape and wm.dtype == np.uint8
                 Ic, _ = crop_to_blocks(I, B)
-                assert np.array_equal(msb(wm), msb(Ic))  # ONLY the 2 LSBs moved
+                # #27: descriptor pixels may cross exactly one quantization window (4),
+                # tag pixels never move -- see the assert in embed_image itself for the
+                # full rule. The bound that actually matters -- clean re-read verifies --
+                # is checked right below via a real detect_image() round trip.
+                assert np.max(np.abs(msb(wm).astype(np.int16) - msb(Ic).astype(np.int16))) <= 4
                 assert np.max(np.abs(wm.astype(np.int16) - Ic.astype(np.int16))) <= 3
-                # Upper bound is the valuable half of this assert: 44.15 dB is the
-                # analytical maximum for full-entropy 2-LSB embedding, so a measured
-                # value ABOVE it means the payload is not full-entropy -- an all-zero
+                det = detect_image(wm, KEY, b"selfcheck", B, variant, refine=False)
+                assert det.raw_mask.sum() == 0, (
+                    f"B={B} variant={variant}: shifted watermark failed to "
+                    "self-authenticate on a clean re-read")
+                # Upper bound is the valuable half of this assert: a measured value
+                # above it means the payload is not full-entropy -- an all-zero
                 # descriptor array, a minv indexing mistake producing a constant, or a
                 # variant typo falling through. A lower-bound-only assert would pass on
                 # all of those. The band is only valid for high-entropy low-frequency
                 # DCT content, which is why _synthetic_natural() exists instead of a
                 # constant image (a flat image legitimately reaches ~50 dB).
-                # ponytail-noted spec resolution: variant B's ceiling is looser than
-                # variant A's. Variant B's descriptor is a per-2x2-group MEAN of
-                # already-quantized values; by the CLT a mean concentrates toward the
-                # centre of its range with LESS than full entropy, regardless of image
-                # content -- confirmed empirically: even fully IID random per-pixel
-                # noise gives variant B ~44.4-44.5 dB, comfortably above the naive
-                # 44.15 ceiling, from averaging alone, not a defect. Variant A's DCT
-                # coefficients are different: payload.py picks their quantization step
-                # sizes via Cauchy-Schwarz specifically so they nearly fill int8's
-                # range, which is why 44.16 is the correct tight ceiling for A only.
-                # Variant B's real-corpus max measured 44.52 dB (kodim10), above the
-                # 44.35 derived from IID-noise assumptions -- photographic content is not IID.
-                hi = 44.30 if variant == "A" else 44.70
+                # #27 REPIN: LSB shifting moved this ceiling up by ~+1.3 dB (was 44.30/
+                # 44.70) -- it is now the same distortion-reduction the whole change is
+                # FOR, not drift to paper over. Re-measured on this exact fixture (B in
+                # {4, 8}, both colour modes) after implementing _shift_lsb_pairs: A
+                # ranges 44.950-45.415 dB, B ranges 45.071-45.643 dB -- B still sits
+                # above A for the same reason as before (its 2x2-mean descriptor is
+                # less than full-entropy by the CLT, on top of the shift gain both
+                # variants now get). New ceilings below carry ~0.2-0.3 dB margin over
+                # those measured maxima, same style as the old ones.
+                hi = 45.60 if variant == "A" else 45.90
                 assert 42.0 <= info["psnr"] <= hi, (variant, info["psnr"])
                 # SSIM floor is 0.96, calibrated against the REAL corpus, not guessed.
                 # Measured across all 32 corpus images x both variants: min 0.97073

@@ -281,7 +281,7 @@ NUMERIC_FIELDS: set[str] = {
     "psnr_whole_marked", "psnr_whole_unmarked", "ssim_whole_marked",
     "n_tampered_blocks", "n_unrecoverable_blocks",
     "n_coincidental_unchanged_px", "n_msb_preserved_miss_blocks",
-    "n_false_positive_blocks", "n_blocks_total",
+    "n_false_positive_blocks", "n_blocks_total", "n_refinement_flagged",
     "elapsed_ms", "width", "height", "channels", "block_size", "key_id", "seed",
 }
 

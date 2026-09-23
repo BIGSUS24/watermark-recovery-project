@@ -59,9 +59,16 @@ def test_keystone() -> None:
                         f"(B={B}, variant={variant}, colour={I.ndim == 3}) -- "
                         "MSB projection is wrong somewhere")
 
-                    # Assertion 2 -- embedding disturbed only the two LSB planes.
+                    # Assertion 2 -- embedding disturbed only the two LSB planes, or (#27)
+                    # shifted a descriptor pixel exactly one quantization window closer to
+                    # its true value -- never further, and never a tag-carrying pixel (see
+                    # embed.py's per-channel loop / _shift_lsb_pairs). Used to be exact
+                    # equality when embedding only ever plain-replaced; now bounded at one
+                    # window (4). Assertion 1 above, not this one, is what actually proves
+                    # shifting didn't break authentication.
                     Ic, _ = crop_to_blocks(I, B)
-                    assert np.array_equal(msb(wm), msb(Ic))
+                    assert np.max(np.abs(msb(wm).astype(np.int16)
+                                        - msb(Ic).astype(np.int16))) <= 4
 
                     # Assertion 3 -- the m/minv canary. MANDATORY AND INDEPENDENT.
                     # Why this cannot be skipped: swapping m and minv between embed and
@@ -128,8 +135,7 @@ def test_tamper_smoke() -> None:
 # format, NOT that the constants are stale. Re-pinning requires a comment
 # naming the deliberate change and confirming test_keystone() still passes.
 #
-# They have been re-pinned twice, both times deliberately, both times to fix a
-# security defect found in adversarial review:
+# They have been re-pinned three times, all deliberate:
 #   1. Binding the carried recovery descriptor into the authentication tag
 #      (format magic WGT1 -> WGT2) changed the HMAC message. That closed a
 #      verified vulnerability in which 96 of 128 payload bits were
@@ -142,9 +148,16 @@ def test_tamper_smoke() -> None:
 #      attacker who knows just the algorithm bias a recoverability-denial attack.
 #      It also turned out to buy nothing: the flat shuffle repairs in the same 2
 #      sweeps and the same ~0.1s.
-# Both changes predate these vectors existing. Had the vectors been in place,
-# each would have fired on the change -- which is exactly the point of having
-# them, and they were absent when both changes were made.
+#   3. #27: embed.py stopped plain-replacing the 2 LSBs and started SHIFTING
+#      descriptor pixels to the nearest value with the right low bits (see
+#      _shift_lsb_pairs), which changes A_/B_/C_payload_b0 and A_/B_/C_sha256 for
+#      every variant -- the embedded bytes themselves are different now, on
+#      purpose, for a measured ~+1.3-1.5 dB imperceptibility gain. map_m/
+#      map_minv/map4096_sha are UNCHANGED (blockmap.py was not touched), which is
+#      exactly the evidence that only the pixel-writing step moved.
+# All three changes predate their own vectors existing at the time; each would
+# have fired on the change that caused it -- which is the whole point of having
+# them.
 #
 # Because the keystream is HMAC-based rather than random.Random, these values
 # are stable across CPython versions, NumPy versions, OS and CPU.
@@ -157,10 +170,10 @@ GOLDEN_IMG = ((np.arange(16 * 16, dtype=np.uint16).reshape(16, 16) * 37) % 256).
 GOLDEN = {
     "map_m": (1, 2, 3, 0),
     "map_minv": (3, 0, 1, 2),
-    "A_payload_b0": "aa0f369b0402fe05ff0dff03030102fe",
-    "A_sha256": "834bed6ae49d74cb5c840dcbac3280c009829742c6dfc831e6c52d9615643403",
-    "B_payload_b0": "7b06f057a1a76f82255761ab5fc22567",
-    "B_sha256": "bf3b2f662897a3f428d18b6f7b57f53ad1a5be71778395b0e1b9ad327677c386",
+    "A_payload_b0": "284f55d40402fe05ff0dff03030102fe",
+    "A_sha256": "c670dc635325074ba7b5012b6876316366f2f7bbd78d7429b6b186b316918f1b",
+    "B_payload_b0": "3b8a8dcea1a76f82255761ab5fc22567",
+    "B_sha256": "17d48b07d376c435e2a2d1a9e8e0e642857e9619d76eb982b2e6b730864c372a",
     # Variant C, added when C became the app's default descriptor. C packs 31-34
     # variable-width signed fields by hand instead of getting sign handling free
     # from int8's byte view, so a one-bit offset slip in the packer is exactly the
@@ -168,8 +181,8 @@ GOLDEN = {
     # Adding these did NOT disturb A_* or B_* above -- verified by regenerating all
     # of them together. That is the evidence that introducing C left the existing
     # wire format bit-identical, so watermarks made before C still verify.
-    "C_payload_b0": "2cd4715a830fc809f2207be3ce34ac27",
-    "C_sha256": "bb914f8193176a761498c58c58c06945c55cdd89ef4d01f955fb67dd4b3459b9",
+    "C_payload_b0": "1edf3cdd830fc809f2207be3ce34ac27",
+    "C_sha256": "6f4641f5ccd9abf58511047deec3ad9c49841cd6a05eaa3ffd0a0bdee5f92c0a",
     "map4096_sha": "aa4456c3b7e36904d66853dab441b48ac896ee950328aa2e2e4131389eada921",
 }
 

@@ -43,7 +43,7 @@ import db  # noqa: E402  -- webapp/db.py, the protected-image library
 
 import imageio_any  # noqa: E402  -- decode-side format adapter (any format -> RGB)
 from embed import embed_image, load_image  # noqa: E402
-from detect import detect_image, expand_mask  # noqa: E402
+from detect import detect_image, expand_mask, refinement_flagged_count  # noqa: E402
 from recover import recover_image  # noqa: E402
 from tamper import apply_tamper, block_mask_from_pixel_mask  # noqa: E402
 from metrics import confusion_counts, loc_scores, recovery_metrics  # noqa: E402
@@ -675,6 +675,9 @@ def api_check():
     resp = dict(
         verdict="TAMPERED" if det.block_mask.sum() > 0 else "AUTHENTIC",
         flagged_blocks=int(det.block_mask.sum()), total_blocks=int(det.info["K"]),
+        # #32: how many of those flagged blocks were flagged ONLY by the neighbourhood
+        # fill (own tag matched) -- repair overwrites these by default.
+        refinement_flagged=refinement_flagged_count(det.raw_mask, det.block_mask),
         precision=loc["precision"], recall=loc["recall"], f1=loc["f1"], iou=loc["iou"],
         raw_overlay=encode_png_data_uri(overlay_block_mask(tampered, det.raw_mask, block)),
         refined_overlay=encode_png_data_uri(overlay_block_mask(tampered, det.block_mask, block)),
@@ -1122,6 +1125,8 @@ def api_verify():
             runner_up=match["runner_up"], candidates_tried=match["candidates_tried"],
             min_verifying_blocks=IDENT_MIN_VERIFYING_BLOCKS),
         flagged_blocks=flagged, total_blocks=int(det.info["K"]),
+        # #32: see api_check's identical field for what this counts.
+        refinement_flagged=refinement_flagged_count(det.raw_mask, det.block_mask),
         changed_pixels=truth["changed_pixels"], total_pixels=truth["total_pixels"],
         changed_ratio=truth["changed_ratio"],
         precision=loc["precision"], recall=loc["recall"], f1=loc["f1"], iou=loc["iou"],

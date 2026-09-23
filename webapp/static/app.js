@@ -447,6 +447,8 @@ $("check-btn").addEventListener("click", () => withBusy($("check-btn"), async ()
       stat("Recall", fmtPct(d.recall), "Of what was really tampered, this share was caught."),
       stat("F1", fmtPct(d.f1), "Precision and recall in one number."),
       stat("IoU", fmtPct(d.iou), "Overlap between the flagged and the real damaged region."),
+      stat("Flagged by fill only", fmtInt(d.refinement_flagged),
+        "Blocks whose own signature matched but a neighbourhood pass flagged them anyway — repair overwrites these by default."),
     ].join("");
 
     show($("check-out"));
@@ -604,6 +606,8 @@ function renderVerifyResult(d) {
       "Of the region that really changed, this share was localized."),
     stat("IoU", fmtPct(d.iou),
       "Overlap between what detection flagged and what actually changed."),
+    stat("Flagged by fill only", fmtInt(d.refinement_flagged),
+      "Blocks whose own signature matched but a neighbourhood pass flagged them anyway — repair overwrites these by default."),
   ].join("");
 
   renderTabs("verify-tabs", "verify-img", "verify-caption", [

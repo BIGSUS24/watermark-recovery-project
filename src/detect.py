@@ -255,6 +255,18 @@ def expand_mask(block_mask: np.ndarray, block: int) -> np.ndarray:
     return np.repeat(np.repeat(block_mask, block, axis=0), block, axis=1)
 
 
+def refinement_flagged_count(raw_mask: np.ndarray, block_mask: np.ndarray) -> int:
+    """#32: count of blocks flagged ONLY by refine_mask's neighbourhood fill -- own tag
+    MATCHED (raw_mask == 0) but the block still ended up in block_mask. recover.py then
+    overwrites this content by default; see recover_image's `skip_refinement_only`.
+
+    One shared helper instead of duplicating the `block_mask & ~raw_mask` boolean in
+    run_experiments.py and webapp/server.py.
+    """
+    return int(np.count_nonzero(np.asarray(block_mask, dtype=bool)
+                                & ~np.asarray(raw_mask, dtype=bool)))
+
+
 # --------------------------------------------------------------------------
 # Self-check
 # --------------------------------------------------------------------------
@@ -271,7 +283,12 @@ if __name__ == "__main__":
     assert refine_mask(d, 7).sum() == 1                       # isolated positive KEPT (default)
     assert refine_mask(d, 7, clear_isolated=True).sum() == 0   # published rule clears it
     d = np.ones((5, 5), dtype=np.uint8); d[2, 2] = 0
-    assert refine_mask(d, 7)[2, 2] == 1                        # surrounded negative filled
+    refined = refine_mask(d, 7)
+    assert refined[2, 2] == 1                                  # surrounded negative filled
+    # #32: refinement_flagged_count isolates exactly the cell refine_mask INVENTED --
+    # own tag "matched" (raw==0) but ended up flagged after the neighbourhood fill.
+    assert refinement_flagged_count(d, refined) == 1
+    assert refinement_flagged_count(d, d) == 0                 # nothing new flagged -> 0
     d = np.zeros((5, 5), dtype=np.uint8); d[0:2, 0:2] = 1
     assert refine_mask(d, 7)[:2, :2].sum() == 4                # a 2x2 cluster survives
     d = np.ones((5, 5), dtype=np.uint8); d[0, 0] = 0
