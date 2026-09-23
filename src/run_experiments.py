@@ -27,6 +27,15 @@ on tamper class or ratio, so it is cached in-memory (never persisted -- determin
 it trivially regenerable) keyed by (image_name, variant, block, key_id). This drops the
 main grid from 768 embeds to 64, and the null grid's key-0 cells reuse main's cache too.
 
+PARALLELISM (#34): each cell is a pure function of (image, key, variant, block, tamper
+class, ratio) -- nothing about one cell depends on another -- so --jobs N runs the grid
+across a ProcessPoolExecutor. The embed cache above is computed ONCE in the parent process
+before any worker is spawned (see _precompute_embed_cache) and shipped to every worker via
+the pool initializer, so parallel execution still embeds each (image, variant, block, key)
+exactly once, not once per worker. Cells complete out of order, but results are buffered
+and written to output/runs.csv strictly in the same order --jobs 1 would have produced
+(see _drain_ready) -- --jobs must never change row order or row content, only wall time.
+
 NULL CONDITION, framed honestly: per-block false-accept probability is 2**-32. No
 feasible number of trials could observe that by chance, so the 5 keys are NOT a
 statistical test of the crypto -- they are an implementation-robustness check. A
@@ -40,7 +49,10 @@ import argparse
 import csv
 import datetime
 import hashlib
+import os
+import sys
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -67,6 +79,13 @@ MAIN_KEY_ID = 0          # key 0 is the one used by the main grid and the ablati
 SEED_BASE_DEFAULT = 20260811   # arbitrary but committed -- must never silently change
 QUALITATIVE_RATIO = 0.25
 QUALITATIVE_VARIANT = "A"
+# #36: was hardcoded to "lena" -- Lena's redistribution status is contested, and USC-SIPI
+# has already withdrawn it (and tiffany) from its own archive (see fetch_corpus.py's module
+# docstring). kodim04 is the Kodak corpus's own well-known portrait -- a close face crop
+# with a woven-straw hat (high-frequency mesh texture), smooth skin gradients, fine hair
+# detail, and a soft fabric backdrop -- so it exercises the same range of texture the
+# qualitative figure is meant to show, without leaning on a redistribution-contested image.
+QUALITATIVE_IMAGE_DEFAULT = "kodim04"
 
 CSV_FIELDS = [
     "run_id", "condition", "dataset", "image_name", "image_id", "width", "height", "channels",
@@ -94,6 +113,11 @@ def load_manifest() -> list[dict]:
     """Read the 32-image corpus from samples/manifest.csv -- never glob the directory."""
     with open(MANIFEST_PATH, newline="", encoding="utf-8") as f:
         rows = [r for r in csv.DictReader(f) if r["dataset"] in ("usc_sipi", "kodak")]
+    # #36 provenance: every corpus row must carry a licence -- UNKNOWN is an acceptable
+    # value (an honest "we don't know"), a missing/empty column is not.
+    assert all(r.get("licence") for r in rows), (
+        "manifest.csv row(s) missing a non-empty 'licence' column -- see #36; "
+        "re-run samples/fetch_corpus.py to regenerate the manifest with provenance")
     samples = []
     for idx, r in enumerate(rows):
         h, w = int(r["height"]), int(r["width"])
@@ -138,13 +162,24 @@ def precompute_splice_sources(samples: list[dict]) -> dict[int, int]:
     return {i: _splice_source_index(samples, i) for i in range(len(samples))}
 
 
-def _qualitative_image_name(samples: list[dict]) -> str:
-    """Prefer 'lena'; fall back to the first USC-SIPI image if the manifest ever changes."""
+def _qualitative_image_name(samples: list[dict], requested: str | None = None) -> str:
+    """Resolve the qualitative-figure image: `requested` (--qualitative-image) if given,
+    else QUALITATIVE_IMAGE_DEFAULT. Falls back to the first USC-SIPI image only if that
+    name isn't actually in the corpus, and says so LOUDLY (stderr) -- a silent substitution
+    here means the qualitative figure the paper's caption describes quietly stops being the
+    one this run actually produced, which is worse than just crashing.
+    """
     names = {s["name"] for s in samples}
-    if "lena" in names:
-        return "lena"
+    want = requested or QUALITATIVE_IMAGE_DEFAULT
+    if want in names:
+        return want
     usc = [s for s in samples if s["dataset"] == "usc_sipi"]
-    return (usc[0] if usc else samples[0])["name"]
+    fallback = (usc[0] if usc else samples[0])["name"]
+    print(f"WARNING: qualitative image {want!r} not found in corpus "
+          f"(manifest has {sorted(names)}) -- falling back to {fallback!r}. The qualitative "
+          f"figure/paper caption will disagree until manifest.csv or --qualitative-image "
+          f"is fixed.", file=sys.stderr)
+    return fallback
 
 
 def get_raw_image(sample: dict, raw_cache: dict) -> np.ndarray:
@@ -173,6 +208,118 @@ def _blocks_msb_allch(img: np.ndarray, block: int) -> np.ndarray:
     if img.ndim == 2:
         return msb(to_blocks(img, block))
     return np.stack([msb(to_blocks(img[:, :, c], block)) for c in range(img.shape[2])], axis=1)
+
+
+# --------------------------------------------------------------------------
+# Parallel execution (#34)
+# --------------------------------------------------------------------------
+# Windows defaults multiprocessing to "spawn": each worker re-imports this module fresh (the
+# module's top-level code runs again, but the `if __name__ == "__main__":` guard at the
+# bottom does not), so a worker cannot inherit state via closures or globals set after
+# import time in the parent -- it only gets what ProcessPoolExecutor's initializer/initargs
+# hands it. Hence the module-level globals and the top-level (picklable) _worker_init /
+# _worker_compute functions below, instead of a closure or bound method.
+
+_W_KEYS = _W_SAMPLES = _W_SPLICE_SRC = _W_RAW_CACHE = _W_EMBED_CACHE = None
+_W_SEED_BASE = _W_QUAL_NAME = None
+
+
+def _worker_init(keys, samples, splice_src, raw_cache, embed_cache, seed_base, qual_name):
+    """Runs once per worker PROCESS at pool startup, not per task -- this is what makes the
+    precomputed embed_cache shared instead of re-sent (or re-embedded) per cell."""
+    global _W_KEYS, _W_SAMPLES, _W_SPLICE_SRC, _W_RAW_CACHE, _W_EMBED_CACHE
+    global _W_SEED_BASE, _W_QUAL_NAME
+    _W_KEYS, _W_SAMPLES, _W_SPLICE_SRC = keys, samples, splice_src
+    _W_RAW_CACHE, _W_EMBED_CACHE = raw_cache, embed_cache
+    _W_SEED_BASE, _W_QUAL_NAME = seed_base, qual_name
+
+
+def _worker_compute(index: int, cell: dict, run_id: str) -> tuple[int, dict]:
+    """Picklable per-task entry point. `index` is the cell's position in the caller's
+    deterministic cell order, carried through purely so results can be sorted back into it."""
+    row = compute_row(cell, run_id, _W_KEYS, _W_SAMPLES, _W_SPLICE_SRC, _W_RAW_CACHE,
+                      _W_EMBED_CACHE, _W_SEED_BASE, _W_QUAL_NAME)
+    return index, row
+
+
+def _required_embed_cache_keys(cells: list[dict], samples: list[dict],
+                               splice_src: dict[int, int]) -> set[tuple[str, str, int, int]]:
+    """Every (image_name, variant, block, key_id) get_watermarked() will be asked for while
+    computing `cells` -- including a splice cell's SOURCE image, which borrows the same
+    (variant, block, key_id) as the cell it splices into (see compute_row)."""
+    ks = set()
+    for cell in cells:
+        s = cell["sample"]
+        ks.add((s["name"], cell["variant"], cell["block"], cell["key_id"]))
+        if cell.get("tamper_class") == "splice":
+            src = samples[splice_src[s["idx"]]]
+            ks.add((src["name"], cell["variant"], cell["block"], cell["key_id"]))
+    return ks
+
+
+def _precompute_embed_cache(cells: list[dict], samples: list[dict], splice_src: dict[int, int],
+                            keys: list[bytes], raw_cache: dict, embed_cache: dict) -> None:
+    """Embed everything `cells` will need, ONCE, here, in the parent process, before any
+    worker exists -- see module docstring's KEY EFFICIENCY DECISION / PARALLELISM. Without
+    this, --jobs>1 would lazily embed on first use PER WORKER PROCESS (each gets its own
+    copy of embed_cache via the pool initializer), multiplying the embed count by --jobs.
+    """
+    by_name = {s["name"]: s for s in samples}
+    for name, variant, block, key_id in sorted(_required_embed_cache_keys(cells, samples, splice_src)):
+        get_watermarked(by_name[name], variant, block, key_id, keys, raw_cache, embed_cache)
+
+
+def _drain_ready(pending_by_idx: dict[int, dict], next_write: int) -> tuple[list[dict], int]:
+    """Pop the contiguous run of rows starting at `next_write` out of `pending_by_idx`, in
+    index order. This is the entire mechanism the byte-identity gate rests on: cells can
+    finish in any order across worker processes, but rows only ever leave this function (and
+    reach the CSV) in the same order --jobs 1 would have produced them in.
+    """
+    ready = []
+    while next_write in pending_by_idx:
+        ready.append(pending_by_idx.pop(next_write))
+        next_write += 1
+    return ready, next_write
+
+
+def _run_parallel(pending: list[tuple[dict, str]], writer, f, keys: list[bytes],
+                  samples: list[dict], splice_src: dict[int, int], raw_cache: dict,
+                  embed_cache: dict, seed_base: int, qual_name: str, total: int,
+                  n_skipped: int, t_start: float, log_every: int, jobs: int) -> int:
+    """Dispatch `pending` (already resume-filtered, in deterministic cell order) to a process
+    pool. embed_cache must already hold everything the cells need (_precompute_embed_cache)
+    before this is called. Progress logs on completion order (unavoidable with a pool), but
+    every row reaches `writer`/`f` strictly in `pending` order via _drain_ready.
+    """
+    n = len(pending)
+    if n == 0:
+        return 0
+    pending_by_idx: dict[int, dict] = {}
+    next_write = 0
+    n_done = 0
+    with ProcessPoolExecutor(max_workers=jobs, initializer=_worker_init,
+                             initargs=(keys, samples, splice_src, raw_cache, embed_cache,
+                                       seed_base, qual_name)) as ex:
+        futures = [ex.submit(_worker_compute, i, cell, run_id)
+                   for i, (cell, run_id) in enumerate(pending)]
+        for fut in as_completed(futures):
+            i, row = fut.result()
+            pending_by_idx[i] = row
+            n_done += 1
+            ready, next_write = _drain_ready(pending_by_idx, next_write)
+            for row_ready in ready:
+                writer.writerow(row_ready)
+            if ready:
+                f.flush()
+            if n_done % log_every == 0 or n_done == n:
+                elapsed = time.perf_counter() - t_start
+                rate = n_done / elapsed if elapsed > 0 else 0.0
+                eta = (n - n_done) / rate if rate > 0 else float("nan")
+                print(f"  [{n_skipped + n_done}/{total}] done={n_done} skipped={n_skipped} "
+                      f"elapsed={elapsed:.1f}s eta={eta:.1f}s (jobs={jobs}, completion order)")
+    assert next_write == n and not pending_by_idx, (
+        "reorder buffer left rows unflushed after pool exit -- a worker task result is missing")
+    return n_done
 
 
 # --------------------------------------------------------------------------
@@ -423,11 +570,16 @@ def load_completed_run_ids(csv_path: Path) -> set[str]:
 def run_grid(cells: list[dict], csv_path: Path, keys: list[bytes], samples: list[dict],
             splice_src: dict[int, int], raw_cache: dict, embed_cache: dict,
             seed_base: int, qual_name: str, resume: bool = True, log_every: int = 25,
-            ) -> tuple[int, int, int]:
+            jobs: int = 1) -> tuple[int, int, int]:
     """Compute every cell, skipping ones already in csv_path when resume=True.
 
-    Header written only if csv_path did not already exist; every row is flushed to disk
-    immediately after being written, so a crash mid-grid loses at most the in-flight row.
+    Header written only if csv_path did not already exist; every row reaches disk as soon
+    as its turn comes -- immediately, for jobs<=1; as soon as the contiguous prefix is
+    ready, for jobs>1 (see _drain_ready) -- so a crash mid-grid loses at most the in-flight
+    row(s).
+
+    jobs<=1 runs the original plain sequential loop -- unchanged, and also the byte-identity
+    reference that --jobs>1's output is diffed against (see module docstring, PARALLELISM).
     """
     completed = load_completed_run_ids(csv_path) if resume else set()
     write_header = not csv_path.exists()
@@ -436,27 +588,43 @@ def run_grid(cells: list[dict], csv_path: Path, keys: list[bytes], samples: list
     n_done = n_skipped = 0
     total = len(cells)
     t_start = time.perf_counter()
+    jobs = max(1, jobs)
     with open(csv_path, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
         if write_header:
             writer.writeheader()
             f.flush()
-        for i, cell in enumerate(cells):
-            run_id = compute_run_id(cell)
-            if resume and run_id in completed:
-                n_skipped += 1
-                continue
-            row = compute_row(cell, run_id, keys, samples, splice_src, raw_cache,
-                              embed_cache, seed_base, qual_name)
-            writer.writerow(row)
-            f.flush()
-            n_done += 1
-            if (i + 1) % log_every == 0 or i == total - 1:
-                elapsed = time.perf_counter() - t_start
-                rate = n_done / elapsed if elapsed > 0 else 0.0
-                eta = (total - i - 1) / rate if rate > 0 else float("nan")
-                print(f"  [{i + 1}/{total}] done={n_done} skipped={n_skipped} "
-                      f"elapsed={elapsed:.1f}s eta={eta:.1f}s")
+
+        if jobs == 1:
+            for i, cell in enumerate(cells):
+                run_id = compute_run_id(cell)
+                if resume and run_id in completed:
+                    n_skipped += 1
+                    continue
+                row = compute_row(cell, run_id, keys, samples, splice_src, raw_cache,
+                                  embed_cache, seed_base, qual_name)
+                writer.writerow(row)
+                f.flush()
+                n_done += 1
+                if (i + 1) % log_every == 0 or i == total - 1:
+                    elapsed = time.perf_counter() - t_start
+                    rate = n_done / elapsed if elapsed > 0 else 0.0
+                    eta = (total - i - 1) / rate if rate > 0 else float("nan")
+                    print(f"  [{i + 1}/{total}] done={n_done} skipped={n_skipped} "
+                          f"elapsed={elapsed:.1f}s eta={eta:.1f}s")
+        else:
+            pending = []
+            for cell in cells:
+                run_id = compute_run_id(cell)
+                if resume and run_id in completed:
+                    n_skipped += 1
+                    continue
+                pending.append((cell, run_id))
+            _precompute_embed_cache([c for c, _ in pending], samples, splice_src, keys,
+                                    raw_cache, embed_cache)
+            n_done = _run_parallel(pending, writer, f, keys, samples, splice_src, raw_cache,
+                                   embed_cache, seed_base, qual_name, total, n_skipped,
+                                   t_start, log_every, jobs)
     return n_done, n_skipped, total
 
 
@@ -522,11 +690,24 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed-base", type=int, default=SEED_BASE_DEFAULT)
     p.add_argument("--only", choices=("main", "null", "ablation"), default=None,
                    help="re-run just one grid block (combine with --restart to also wipe the CSV)")
+    p.add_argument("--jobs", type=int, default=os.cpu_count() or 1,
+                   help="parallel worker processes for the grid (default: os.cpu_count()); "
+                        "--jobs 1 forces the old sequential path")
+    p.add_argument("--qualitative-image", default=None, metavar="NAME",
+                   help=f"corpus image (manifest stem) to retain full qualitative artifacts "
+                        f"for (default: {QUALITATIVE_IMAGE_DEFAULT!r})")
+    p.add_argument("--selfcheck", action="store_true",
+                   help="run the internal self-check (no corpus/network needed) and exit")
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    if args.selfcheck:
+        _selfcheck()
+        print("run_experiments.py self-check OK")
+        return
+
     t_start = time.perf_counter()
     csv_path = OUTPUT_DIR / "runs.csv"
     if args.restart and csv_path.exists():
@@ -535,7 +716,7 @@ def main() -> None:
     samples = load_manifest()
     keys = [make_key(i) for i in range(N_KEYS)]
     splice_src = precompute_splice_sources(samples)
-    qual_name = _qualitative_image_name(samples)
+    qual_name = _qualitative_image_name(samples, args.qualitative_image)
     raw_cache: dict = {}
     embed_cache: dict = {}
 
@@ -549,7 +730,7 @@ def main() -> None:
         ]
         done, skipped, total = run_grid(cells, csv_path, keys, samples, splice_src,
                                           raw_cache, embed_cache, args.seed_base, qual_name,
-                                          resume=not args.restart)
+                                          resume=not args.restart, jobs=args.jobs)
         print(f"\n--quick: {done} computed, {skipped} skipped, {total} cells, "
               f"{time.perf_counter() - t_start:.1f}s wall-clock")
         _print_final_summary(csv_path)
@@ -563,13 +744,63 @@ def main() -> None:
         print(f"\n=== {g}: {len(cells)} cells ===")
         done, skipped, total = run_grid(cells, csv_path, keys, samples, splice_src,
                                           raw_cache, embed_cache, args.seed_base, qual_name,
-                                          resume=not args.restart)
+                                          resume=not args.restart, jobs=args.jobs)
         grand_done += done; grand_skipped += skipped; grand_total += total
 
     elapsed = time.perf_counter() - t_start
     print(f"\nTotal: {grand_done} computed, {grand_skipped} skipped (resumed), "
           f"{grand_total} cells across {groups}. Wall-clock: {elapsed:.1f}s")
     _print_final_summary(csv_path)
+
+
+# --------------------------------------------------------------------------
+# Self-check -- run manually with `python src/run_experiments.py --selfcheck`.
+# --------------------------------------------------------------------------
+
+def _selfcheck() -> None:
+    """Pure-logic checks for what #34/#36 added: no corpus, no network, no image pipeline.
+    The real end-to-end guarantee (--jobs 1 vs --jobs N byte-identical on output/runs.csv)
+    is verified by actually running the grid twice and diffing, per the module docstring --
+    that's an integration property, not something a unit-style self-check can fake. What's
+    checked here is the machinery that guarantee depends on.
+    """
+    # _qualitative_image_name: default, explicit override, and the loud fallback path.
+    fake_samples = [
+        {"name": "kodim04", "dataset": "kodak"},
+        {"name": "airplane", "dataset": "usc_sipi"},
+        {"name": "baboon", "dataset": "usc_sipi"},
+    ]
+    assert _qualitative_image_name(fake_samples) == QUALITATIVE_IMAGE_DEFAULT
+    assert _qualitative_image_name(fake_samples, "baboon") == "baboon"
+    assert _qualitative_image_name(fake_samples, "does_not_exist") == "airplane"  # 1st USC-SIPI
+    no_usc = [{"name": "kodim04", "dataset": "kodak"}]
+    assert _qualitative_image_name(no_usc, "nope") == "kodim04"  # falls back to samples[0]
+
+    # _required_embed_cache_keys: a splice cell must also pull in its SOURCE image's embed,
+    # at the same (variant, block, key_id) as the cell it splices into.
+    s0, s1 = {"name": "a", "idx": 0}, {"name": "b", "idx": 1}
+    samples2, splice_src = [s0, s1], {0: 1, 1: 0}
+    cells = [
+        {"sample": s0, "variant": "A", "block": 8, "key_id": 0, "tamper_class": "splice"},
+        {"sample": s1, "variant": "A", "block": 8, "key_id": 0, "tamper_class": "copy_move"},
+    ]
+    ks = _required_embed_cache_keys(cells, samples2, splice_src)
+    assert ks == {("a", "A", 8, 0), ("b", "A", 8, 0)}, ks
+
+    # _drain_ready: the entire byte-identity guarantee for --jobs>1 rests on this. Feed it
+    # completions arriving out of index order and check rows only ever leave in index order.
+    pending_by_idx: dict[int, str] = {}
+    next_write, flushed = 0, []
+    for i in (2, 0, 3, 1, 4):  # arrival order != index order
+        pending_by_idx[i] = f"row{i}"
+        ready, next_write = _drain_ready(pending_by_idx, next_write)
+        flushed.extend(ready)
+    assert flushed == [f"row{i}" for i in range(5)], flushed
+    assert next_write == 5 and not pending_by_idx
+
+    print("  qualitative-image resolution (default/override/loud-fallback) -- OK")
+    print("  splice-aware required embed cache keys -- OK")
+    print("  reorder buffer preserves index order under out-of-order completion -- OK")
 
 
 if __name__ == "__main__":

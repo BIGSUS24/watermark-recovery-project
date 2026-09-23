@@ -25,7 +25,7 @@ from PIL import Image
 # left to fire first with a different message.
 Image.MAX_IMAGE_PIXELS = None
 
-LOSSLESS = frozenset({"png", "bmp", "tiff"})  # formats whose 2 LSB planes survive a save
+LOSSLESS = frozenset({"png", "bmp", "tiff", "webp_lossless"})  # formats whose 2 LSB planes survive a save
 MAX_PIXELS = 40_000_000  # decompression-bomb guard, per page
 MAX_PAGES = 20           # PDF page cap
 
@@ -36,11 +36,11 @@ _WIDE_INT_MODES = {"I", "I;16", "I;16B", "I;16L", "I;16N"}
 
 _LOSSY_NOTE = {
     "jpeg": "JPEG re-encodes pixels lossily; a fragile 2-LSB watermark will not survive it.",
-    # ponytail: WebP can be lossy or lossless, but the two are indistinguishable from
-    # the leading magic bytes alone (both start RIFF....WEBP); we conservatively call
-    # every WebP lossy. Upgrade path: parse the VP8/VP8L/VP8X chunk id that follows.
-    "webp": "WebP is assumed lossy here (lossless WebP cannot be told apart by magic "
-            "bytes alone); a fragile 2-LSB watermark may not survive it.",
+    # "webp" here is specifically the VP8 (lossy) or VP8X (container -- see sniff() for
+    # why that one is treated as lossy) sub-format. True lossless WebP sniffs as the
+    # separate "webp_lossless" fmt and is deliberately absent from this table: it is in
+    # LOSSLESS, not lossy, and needs no caveat note.
+    "webp": "WebP (VP8/VP8X) is lossy; a fragile 2-LSB watermark may not survive it.",
     "gif": "GIF quantizes to a 256-colour palette; the original full-colour pixel "
            "values are already gone by the time this module sees them.",
 }
@@ -54,7 +54,7 @@ class Page(NamedTuple):
     """
     name: str            # e.g. "notice.pdf p3" or just the filename stem
     rgb: np.ndarray      # (H, W, 3) uint8, RGB order, NEVER RGBA, never greyscale-2D
-    fmt: str             # sniffed format: "png"/"jpeg"/"bmp"/"tiff"/"webp"/"gif"/"pdf"
+    fmt: str             # sniffed format: "png"/"jpeg"/"bmp"/"tiff"/"webp"/"webp_lossless"/"gif"/"pdf"
     lossy: bool          # True if this pixel data cannot carry a fragile watermark reliably
     page: int | None     # 1-based page number for PDFs, else None
     note: str            # "" or a short human-readable caveat, e.g. why it is lossy
@@ -71,7 +71,13 @@ def sniff(data: bytes) -> str:
     if data.startswith(b"II*\x00") or data.startswith(b"MM\x00*"):
         return "tiff"
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "webp"
+        # The chunk id right after the "WEBP" tag tells lossy from lossless: "VP8 " is
+        # lossy, "VP8L" is lossless. "VP8X" is an extended-container chunk that can wrap
+        # either an ALPH+VP8L payload or a plain VP8 one, and telling which would mean
+        # walking the RIFF chunk list -- not worth it here, so VP8X is called lossy, the
+        # conservative direction: a false "lossless" would tell a caller their fragile
+        # LSB watermark is safe on a file that can, in fact, re-encode it away.
+        return "webp_lossless" if data[12:16] == b"VP8L" else "webp"
     if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
         return "gif"
     if data.startswith(b"%PDF"):
@@ -195,9 +201,9 @@ def decode(data: bytes, filename: str = "", dpi: int = 200) -> list[Page]:
 # Self-check -- synthesises every fixture in memory, no files on disk.
 # --------------------------------------------------------------------------
 
-def _save(img: Image.Image, fmt: str) -> bytes:
+def _save(img: Image.Image, fmt: str, **kw) -> bytes:
     buf = io.BytesIO()
-    img.save(buf, format=fmt)
+    img.save(buf, format=fmt, **kw)
     return buf.getvalue()
 
 
@@ -208,7 +214,8 @@ if __name__ == "__main__":
         "jpeg": _save(Image.new("RGB", (4, 4), (1, 2, 3)), "JPEG"),
         "bmp": _save(Image.new("RGB", (4, 4), (1, 2, 3)), "BMP"),
         "tiff": _save(Image.new("RGB", (4, 4), (1, 2, 3)), "TIFF"),
-        "webp": _save(Image.new("RGB", (4, 4), (1, 2, 3)), "WEBP"),
+        "webp": _save(Image.new("RGB", (4, 4), (1, 2, 3)), "WEBP"),  # default save = lossy VP8
+        "webp_lossless": _save(Image.new("RGB", (4, 4), (1, 2, 3)), "WEBP", lossless=True),  # VP8L
         "gif": _save(Image.new("RGB", (4, 4), (1, 2, 3)), "GIF"),
         "pdf": b"%PDF-1.7\n%fake but magic bytes are real\n",
     }
@@ -270,7 +277,7 @@ if __name__ == "__main__":
         assert p.rgb.flags["C_CONTIGUOUS"]
 
     # 6. lossy is correct per format, with a note whenever True.
-    expect_lossy = {"png": False, "bmp": False, "tiff": False,
+    expect_lossy = {"png": False, "bmp": False, "tiff": False, "webp_lossless": False,
                     "jpeg": True, "webp": True, "gif": True}
     for fmt, want in expect_lossy.items():
         p = decode(samples[fmt])[0]

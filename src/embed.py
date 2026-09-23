@@ -5,11 +5,13 @@ direction contract (m vs minv). Any change here to bit order, block order, or th
 HMAC message must be made in detect.py too, or every block fails verification.
 """
 
+import warnings
 from pathlib import Path
 
 import cv2
 import numpy as np
 
+import imageio_any
 from blockmap import build_map
 from metrics import image_metrics
 from payload import (bits_to_lsb_pairs, block_tags, budget, coerce_key,
@@ -100,15 +102,24 @@ def embed_image(img: np.ndarray, key: bytes | str, image_id: bytes | str,
 
 
 def load_image(path: str | Path) -> np.ndarray:
-    """Read an image as uint8 RGB (or greyscale); converts OpenCV BGR at the I/O boundary."""
-    img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
-    if img is None:
-        raise ValueError(f"could not read image: {path}")
-    if img.ndim == 3 and img.shape[2] == 3:
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    elif img.ndim == 3 and img.shape[2] == 4:
-        img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)  # kept 4-channel; embed_image rejects it
-    return img
+    """Read an image as uint8 RGB via imageio_any -- NOT a raw cv2.imread.
+
+    imageio_any normalises every format to (H, W, 3) uint8 RGB, including RGBA: the
+    alpha channel is composited over white rather than hitting embed_image's 4-channel
+    rejection (see embed_image's docstring for why that rejection itself stays). Any
+    caveat imageio_any attaches (alpha composited, format is lossy, ...) is surfaced as
+    a warning here since load_image's return type is a plain array with nowhere else to
+    put it.
+    """
+    path = Path(path)
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"could not read image: {path}") from exc
+    page = imageio_any.decode(data, filename=path.name)[0]
+    if page.note:
+        warnings.warn(f"{path}: {page.note}")
+    return page.rgb
 
 
 def save_image(path: str | Path, img: np.ndarray) -> None:
@@ -201,5 +212,24 @@ if __name__ == "__main__":
         raise SystemExit("expected ValueError for non-uint8 input")
     except ValueError:
         pass
+
+    # load_image: RGBA on disk composites to (H, W, 3) RGB over white, with a warning,
+    # instead of coming back 4-channel and hitting embed_image's rejection above (#24).
+    import tempfile
+    from PIL import Image as _Image
+    hole = np.full((32, 32, 4), (0, 200, 0, 255), dtype=np.uint8)
+    hole[2:6, 2:6] = (0, 0, 200, 0)  # blue, fully transparent
+    with tempfile.TemporaryDirectory() as tmp:
+        rgba_path = Path(tmp) / "rgba.png"
+        _Image.fromarray(hole, mode="RGBA").save(rgba_path)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            loaded = load_image(rgba_path)
+        assert loaded.shape == (32, 32, 3), loaded.shape
+        assert tuple(loaded[3, 3]) == (255, 255, 255), loaded[3, 3]  # hole -> white
+        assert tuple(loaded[0, 0]) == (0, 200, 0)                    # opaque area untouched
+        assert any("composited" in str(w.message) for w in caught), "expected alpha-composite warning"
+        wm, _ = embed_image(loaded, KEY, b"rgba-selfcheck", 8, "A")  # no longer throws on RGBA files
+        assert wm.shape == (32, 32, 3)  # block-aligned already, no cropping needed
 
     print("embed.py self-check OK")

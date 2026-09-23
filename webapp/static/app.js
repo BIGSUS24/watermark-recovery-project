@@ -283,6 +283,18 @@ async function runProtect(pageNum) {
     srcNote.hidden = !d.source_note;
     if (d.source_note) srcNote.textContent = d.source_note;
 
+    // #37: relaxations > 0 means blockmap.build_map couldn't hold its target minimum
+    // separation between a block and the backup block carrying its descriptor -- honest
+    // to surface, not just silently accept a weaker recovery guarantee.
+    const relaxNote = $("protect-relax-note");
+    relaxNote.hidden = !d.relaxations;
+    if (d.relaxations) {
+      relaxNote.textContent = `⚠ This image's small size forced the recovery-descriptor ` +
+        `pairing to relax its minimum-separation target ${d.relaxations} time` +
+        `${d.relaxations === 1 ? "" : "s"} — backup blocks may sit closer together than ` +
+        `ideal, weakening (not breaking) the tamper-coincidence guarantee.`;
+    }
+
     $("saved-badge").textContent = `Saved to library as #${d.record_id}`;
     $("download-protected").href = `/api/library/${d.record_id}/download`;
     $("id-input").value = d.image_id;
@@ -327,6 +339,7 @@ function protectAllCard(r) {
         <div class="lib-meta">
           #${r.record_id} &middot; ${fmtInt(r.blocks)} blocks<br>
           PSNR ${fmtNum(r.psnr, 2)} dB &middot; SSIM ${fmtNum(r.ssim, 4)}
+          ${r.relaxations ? `<br>⚠ min-separation relaxed ${r.relaxations}×` : ""}
         </div>
       </div>
       <div class="lib-actions">

@@ -4,11 +4,16 @@ Thin HTTP/JSON layer over the frozen src/ pipeline (embed -> detect -> recover).
 No numerics live here -- every number returned to the browser comes straight
 from src/, exactly as computed, never re-rounded or re-derived.
 
-# ponytail: SESSION is a single global in-memory dict, no auth, no locking --
-# this is a single-user local tool, not a multi-tenant server. Ceiling: exactly
-# one concurrent user/tab; a second tab silently shares (and can clobber) the
-# first tab's state. Upgrade path: key SESSION by a per-tab id (Flask session
-# cookie or a client-generated UUID) if multi-user support is ever needed.
+# #23: each browser tab gets its own state, isolated by Flask's signed session
+# cookie -- the cookie carries only a random id, the actual per-tab state (numpy
+# arrays, detection dataclasses) stays server-side in _SESSIONS, keyed by that
+# id, because none of that belongs inside a signed cookie.
+# ponytail: _SESSIONS is still one global in-memory dict, no auth, no locking,
+# no eviction -- this is a single-user-per-tab local tool, not a multi-tenant
+# server. Ceiling: a tab's entry lives forever (one dict per tab ever opened,
+# for the life of the process) and two requests from the SAME tab still race
+# with no lock. Upgrade path: TTL/LRU eviction if this ever runs longer than a
+# demo session.
 
 Run:      python webapp/server.py
 Serves:   http://127.0.0.1:8765/
@@ -17,6 +22,9 @@ Serves:   http://127.0.0.1:8765/
 import base64
 import csv
 import io
+import json
+import os
+import secrets
 import sys
 import zipfile
 from functools import wraps
@@ -24,7 +32,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, jsonify, request, session
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src"
@@ -45,9 +53,31 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32MB: generous for one upload
 
 # ---------------------------------------------------------------------------
-# Session state -- see module docstring's ponytail note
+# Session state -- see module docstring's #23 note
 # ---------------------------------------------------------------------------
-SESSION: dict = {}
+app.secret_key = os.environ.get("WATERMARK_FLASK_SECRET")
+if not app.secret_key:
+    app.secret_key = secrets.token_hex(32)
+    app.logger.warning(
+        "WATERMARK_FLASK_SECRET not set -- signing session cookies with a random "
+        "per-process key. Every open tab's session is invalidated the next time "
+        "this process restarts; set WATERMARK_FLASK_SECRET to a stable value if "
+        "that matters to you.")
+
+_SESSIONS: dict[str, dict] = {}  # cookie sid -> that tab's state
+
+
+def SESS() -> dict:
+    """This browser tab's private state dict, keyed off the signed session
+    cookie. First call for a tab mints a random id and stamps it into the
+    cookie; every call after that finds the same dict -- which is what gives
+    each tab its own Protect/Damage/Check/Repair pipeline instead of every
+    tab clobbering one shared global (the bug this replaces)."""
+    sid = session.get("sid")
+    if sid is None:
+        sid = secrets.token_urlsafe(16)
+        session["sid"] = sid
+    return _SESSIONS.setdefault(sid, {})
 
 
 class ApiError(Exception):
@@ -59,8 +89,8 @@ class ApiError(Exception):
 
 
 def require(key: str, message: str):
-    """Fetch SESSION[key] or raise a 409 explaining which earlier step is missing."""
-    val = SESSION.get(key)
+    """Fetch this tab's SESS()[key] or raise a 409 explaining which earlier step is missing."""
+    val = SESS().get(key)
     if val is None:
         raise ApiError(message, 409)
     return val
@@ -211,6 +241,26 @@ def reject_if_lossy(page) -> None:
     if page.lossy:
         raise ApiError(_LOSSY_UPLOAD_EXPLANATION.format(
             note=page.note or f"{page.fmt} is a lossy source for this purpose."), 400)
+
+
+# #37: below this, blockmap.build_map's d_min search has to relax so much (or, at the
+# floor, run out of distinct blocks entirely) that "far-away backup block" stops being a
+# meaningful guarantee -- a tiny image's blocks are all close together no matter how
+# they're paired. Rather than silently accept a degraded guarantee, refuse outright: the
+# embed_image K<3 ValueError below already refuses anything under ~24x24 at block=8, this
+# just draws the honest line much higher, in pixels a user actually reasons about.
+MIN_PROTECT_SIDE = 128
+
+
+def reject_too_small(rgb: np.ndarray) -> None:
+    h, w = rgb.shape[:2]
+    if h < MIN_PROTECT_SIDE or w < MIN_PROTECT_SIDE:
+        raise ApiError(
+            f"This image is {w}x{h} pixels -- below the {MIN_PROTECT_SIDE}x{MIN_PROTECT_SIDE} "
+            "minimum this app protects. A small image forces the recovery-descriptor pairing "
+            "into blocks that are all close together, which quietly weakens the 'backup lives "
+            "far from the original' guarantee the recovery scheme relies on -- so rather than "
+            "protect it with a silently degraded guarantee, this is refused outright.", 400)
 
 
 # ---------------------------------------------------------------------------
@@ -432,6 +482,8 @@ def api_protect():
     else:
         raise ApiError("provide either 'sample' or 'upload_b64'", 400)
 
+    reject_too_small(rgb)  # #37 -- before crop_to_blocks, so the message reports the
+                            # size the user actually uploaded, not a post-crop remainder
     cropped_original, _ = crop_to_blocks(rgb, block)
     image_id_str = (body.get("image_id") or "").strip()
     image_id = (image_id_str.encode("utf-8") if image_id_str
@@ -459,8 +511,8 @@ def api_protect():
     finally:
         con.close()
 
-    SESSION.clear()
-    SESSION.update(original=cropped_original, watermarked=wm, key=key, image_id=image_id,
+    SESS().clear()
+    SESS().update(original=cropped_original, watermarked=wm, key=key, image_id=image_id,
                    block=block, variant=variant, embed_info=info,
                    record_id=record_id, name=f"{stem}.png")
 
@@ -474,6 +526,7 @@ def api_protect():
         record_id=record_id, name=f"{stem}.png", library_size=library_size,
         sha256=db.sha256_hex(wm_png), bytes=len(wm_png),
         source_note=source_note, pages_available=pages_available, page=page_num,
+        relaxations=int(info["map_info"]["relaxations"]),  # #37
     )
 
 
@@ -483,9 +536,9 @@ def api_protect_all():
     """Protect EVERY page of one upload in one shot (the multi-page-PDF case) -- each
     page becomes its own library record, and all of them download together as a zip.
 
-    SESSION still holds only the single-image model (see module docstring): it is left
-    pointing at the LAST page protected, purely so the existing single-image UI has
-    something coherent to show after this runs, not as a real multi-page session.
+    This tab's SESS() still holds only the single-image model (see module docstring):
+    it is left pointing at the LAST page protected, purely so the existing single-image
+    UI has something coherent to show after this runs, not as a real multi-page session.
     """
     body = request.get_json(force=True, silent=True) or {}
     key = (body.get("key") or "").strip() or "watermark-secret"
@@ -508,6 +561,7 @@ def api_protect_all():
     try:
         for i, page in enumerate(pages, start=1):
             name = f"{base_stem} p{i}"
+            reject_too_small(page.rgb)  # #37
             cropped_original, _ = crop_to_blocks(page.rgb, block)
             image_id = (image_id_str.encode("utf-8") if image_id_str
                        else default_image_id(name, cropped_original.shape, block))
@@ -528,10 +582,11 @@ def api_protect_all():
             protected_pngs[name] = wm_png
             results.append(dict(
                 record_id=record_id, name=name, psnr=info["psnr"], ssim=info["ssim"],
-                blocks=info["K"], thumb=encode_png_data_uri(thumbnail(wm))))
+                blocks=info["K"], thumb=encode_png_data_uri(thumbnail(wm)),
+                relaxations=int(info["map_info"]["relaxations"])))  # #37
 
-            SESSION.clear()
-            SESSION.update(original=cropped_original, watermarked=wm, key=key,
+            SESS().clear()
+            SESS().update(original=cropped_original, watermarked=wm, key=key,
                            image_id=image_id, block=block, variant=variant,
                            embed_info=info, record_id=record_id, name=name)
         library_size = db.count(con)
@@ -541,15 +596,15 @@ def api_protect_all():
     if not results:
         raise ApiError("upload decoded to zero pages", 400)  # imageio_any never returns this
 
-    SESSION["protect_all_pngs"] = protected_pngs
-    SESSION["protect_all_stem"] = base_stem
+    SESS()["protect_all_pngs"] = protected_pngs
+    SESS()["protect_all_stem"] = base_stem
     return ok(results=results, count=len(results), library_size=library_size)
 
 
 @app.route("/api/protect/all/download")
 @guarded
 def api_protect_all_download():
-    pngs = SESSION.get("protect_all_pngs")
+    pngs = SESS().get("protect_all_pngs")
     if not pngs:
         raise ApiError("there is nothing to download yet -- run /api/protect/all first", 409)
     buf = io.BytesIO()
@@ -557,7 +612,7 @@ def api_protect_all_download():
         for name, png_bytes in pngs.items():
             zf.writestr(f"{name}.png", png_bytes)
     data = buf.getvalue()
-    stem = SESSION.get("protect_all_stem") or "protected"
+    stem = SESS().get("protect_all_stem") or "protected"
     return Response(data, mimetype="application/zip", headers={
         "Content-Disposition": f'attachment; filename="{stem}_pages.zip"',
         "Content-Length": str(len(data)),
@@ -568,7 +623,7 @@ def api_protect_all_download():
 @guarded
 def api_damage():
     wm = require("watermarked", "Protect an image first (Step 1).")
-    block = SESSION["block"]
+    block = SESS()["block"]
     body = request.get_json(force=True, silent=True) or {}
     h, w = wm.shape[:2]
 
@@ -583,7 +638,7 @@ def api_damage():
             y0, x0, y1, x1 = preset_rect(h, w, kind, ratio)
             tampered, mask = rect_noise_tamper(wm, y0, x0, y1, x1, seed=11 if kind == "corner" else 22)
         elif kind == "scatter":
-            image_id_str = SESSION["image_id"].decode("utf-8", "replace")
+            image_id_str = SESS()["image_id"].decode("utf-8", "replace")
             tampered, mask, _ = scatter_damage(wm, image_id_str, ratio)
             ys, xs = np.nonzero(mask)
             y0, x0 = (int(ys.min()), int(xs.min())) if ys.size else (0, 0)
@@ -593,7 +648,7 @@ def api_damage():
 
     mask = np.asarray(mask, dtype=bool)
     achieved_ratio = float(mask.sum() / mask.size)
-    SESSION.update(tampered=tampered, gt_mask_px=mask, det=None, rec=None)
+    SESS().update(tampered=tampered, gt_mask_px=mask, det=None, rec=None)
     return ok(tampered=encode_png_data_uri(tampered), achieved_ratio=achieved_ratio,
               kind=kind, rect=[y0, x0, y1, x1])
 
@@ -602,16 +657,16 @@ def api_damage():
 @guarded
 def api_check():
     tampered = require("tampered", "Damage the image first (Step 2).")
-    key, image_id = SESSION["key"], SESSION["image_id"]
-    block, variant = SESSION["block"], SESSION["variant"]
+    key, image_id = SESS()["key"], SESS()["image_id"]
+    block, variant = SESS()["block"], SESS()["variant"]
     body = request.get_json(force=True, silent=True) or {}
     tau = int(body.get("tau", 7))
     refine = bool(body.get("refine", True))
 
     det = detect_image(tampered, key, image_id, block, variant, tau=tau, refine=refine)
-    SESSION["det"] = det
+    SESS()["det"] = det
 
-    gt_mask_px = SESSION.get("gt_mask_px")
+    gt_mask_px = SESS().get("gt_mask_px")
     gt_block = (block_mask_from_pixel_mask(gt_mask_px, block) if gt_mask_px is not None
                 else np.zeros_like(det.block_mask, dtype=bool))
     tp, fp, fn, tn = confusion_counts(det.block_mask, gt_block)
@@ -635,15 +690,15 @@ def api_check():
 @guarded
 def api_repair():
     det = require("det", "Check the image first (Step 3).")
-    tampered, wm = SESSION["tampered"], SESSION["watermarked"]
-    block, variant = SESSION["block"], SESSION["variant"]
+    tampered, wm = SESS()["tampered"], SESS()["watermarked"]
+    block, variant = SESS()["block"], SESS()["variant"]
 
     rec = recover_image(tampered, det, block, variant)
-    SESSION["rec"] = rec
-    SESSION["repaired_image"] = rec.image  # makes /api/download/repaired available
+    SESS()["rec"] = rec
+    SESS()["repaired_image"] = rec.image  # makes /api/download/repaired available
 
     unrec_px = expand_mask(rec.unrecoverable_mask, block)
-    gt_mask_px = SESSION.get("gt_mask_px")
+    gt_mask_px = SESS().get("gt_mask_px")
     if gt_mask_px is None:
         gt_mask_px = expand_mask(det.block_mask, block).astype(bool)
     rm = recovery_metrics(wm, rec.image, gt_mask_px, unrec_px)
@@ -662,8 +717,8 @@ def api_repair():
 @guarded
 def api_attack_transplant():
     wm = require("watermarked", "Protect an image first (Step 1).")
-    key, image_id = SESSION["key"], SESSION["image_id"]
-    block, variant = SESSION["block"], SESSION["variant"]
+    key, image_id = SESS()["key"], SESS()["image_id"]
+    block, variant = SESS()["block"], SESS()["variant"]
     h, w = wm.shape[:2]
     rg, cg = h // block, w // block
     body = request.get_json(force=True, silent=True) or {}
@@ -710,8 +765,8 @@ def api_attack_transplant():
 @guarded
 def api_attack_coincidence():
     wm = require("watermarked", "Protect an image first (Step 1).")
-    key, image_id = SESSION["key"], SESSION["image_id"]
-    block, variant = SESSION["block"], SESSION["variant"]
+    key, image_id = SESS()["key"], SESS()["image_id"]
+    block, variant = SESS()["block"], SESS()["variant"]
     h, w = wm.shape[:2]
     rg, cg = h // block, w // block
     body = request.get_json(force=True, silent=True) or {}
@@ -761,16 +816,16 @@ def api_audit(block):
     # an image clears any earlier detection). Running one here on whatever image is
     # current is the same detection they would have got, so refusing to do it added
     # nothing but a dead end.
-    det = SESSION.get("det")
+    det = SESS().get("det")
     if det is None:
-        img = (SESSION["tampered"] if SESSION.get("tampered") is not None
-               else SESSION.get("watermarked"))
+        img = (SESS()["tampered"] if SESS().get("tampered") is not None
+               else SESS().get("watermarked"))
         if img is None:
             raise ApiError("Protect or verify an image first -- there is no image to audit yet.",
                            409)
-        det = detect_image(img, SESSION["key"], SESSION["image_id"], SESSION["block"],
-                           SESSION["variant"])
-        SESSION["det"] = det
+        det = detect_image(img, SESS()["key"], SESS()["image_id"], SESS()["block"],
+                           SESS()["variant"])
+        SESS()["det"] = det
     channel = int(request.args.get("channel", 0))
     K, channels = int(det.info["K"]), int(det.info["channels"])
     if not (0 <= block < K):
@@ -835,6 +890,50 @@ def api_library_delete(rid):
         con.close()
 
 
+@app.route("/api/export", methods=["POST"])
+@guarded
+def api_export():
+    """#39: every non-deleted protected PNG, plus manifest.json describing each row.
+
+    Keys are the entire point of #16's encryption -- they never ride along by
+    default. A caller who explicitly supplies the master key in the request body
+    gets them decrypted into the manifest (on the theory that anyone holding the
+    master key can already decrypt every key in the DB anyway); without one, the
+    manifest simply has no key field at all.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    master_key_in = (body.get("master_key") or "").strip()
+    master = db.parse_master_key(master_key_in) if master_key_in else None
+
+    con = db.connect()
+    try:
+        rows = db.list_all_rows(con)
+        manifest = []
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for row in rows:
+                arcname = f"{row['id']}_{Path(row['name']).stem}.png"
+                zf.writestr(arcname, bytes(row["png"]))
+                entry = db.row_meta(row)
+                entry["file"] = arcname
+                if master is not None:
+                    try:
+                        entry["key"] = db.decrypt_key(row, master)
+                    except Exception:  # noqa: BLE001 -- wrong master key must not 500 the export
+                        entry["key"] = None
+                        entry["key_error"] = "could not decrypt this row with the supplied master key"
+                manifest.append(entry)
+            zf.writestr("manifest.json", json.dumps(manifest, indent=2, default=str))
+        data = buf.getvalue()
+    finally:
+        con.close()
+
+    return Response(data, mimetype="application/zip", headers={
+        "Content-Disposition": 'attachment; filename="library_export.zip"',
+        "Content-Length": str(len(data)),
+    })
+
+
 # Which in-memory image each /api/download/<what> name refers to, and the suffix
 # its filename gets. Keeping it as a table means adding a downloadable artefact is
 # one line, and an unknown name can never fall through to something unintended.
@@ -852,10 +951,10 @@ def api_download(what):
     if what not in _DOWNLOADABLE:
         raise ApiError(f"nothing downloadable is called {what!r}", 404)
     session_key, suffix = _DOWNLOADABLE[what]
-    img = SESSION.get(session_key)
+    img = SESS().get(session_key)
     if img is None:
         raise ApiError(f"there is no {what} image yet -- run that step first", 409)
-    stem = Path(SESSION.get("name") or "image").stem
+    stem = Path(SESS().get("name") or "image").stem
     return png_download(encode_png_bytes(img), f"{stem}_{suffix}.png")
 
 
@@ -898,12 +997,20 @@ def identify(rgb: np.ndarray, con) -> dict:
     and it inherits the watermark's own security argument.
     """
     h, w = rgb.shape[:2]
+    # #2/#3: shape gate. The watermark is bound to an exact pixel grid -- a resize OR a
+    # 90-degree rotation changes (h, w) and every block boundary moves with it, so the
+    # comparison below is not "close enough", it is "identical or meaningless". Filtering
+    # candidates to an exact height/width match (db.candidates_for_shape) IS that gate;
+    # this is just naming it, rather than leaving a bare 404 to look like a lookup miss.
     rows = db.candidates_for_shape(con, h, w)
     if not rows:
         raise ApiError(
             f"No protected image in the library is {w}x{h} pixels, so this file cannot "
-            "be one of them. Protect an image first, download it, and upload that file "
-            "(or a tampered copy of it) here.", 404)
+            "be one of them. If this file started as a protected image, resizing, "
+            "cropping, or rotating it changed its dimensions -- any of which destroys the "
+            "watermark by shifting every block off the grid it was embedded on, and there "
+            "is no recovering from that. Protect an image first, download it, and upload "
+            "that file (or a tampered-but-not-resized copy of it) here.", 404)
 
     tried = []
     best = None
@@ -911,8 +1018,8 @@ def identify(rgb: np.ndarray, con) -> dict:
         block = int(row["block"])
         if h % block or w % block:
             continue  # geometry cannot line up; a verification here is meaningless
-        det = detect_image(rgb, row["key"], bytes(row["image_id"]), block, row["variant"],
-                           refine=False)
+        det = detect_image(rgb, db.decrypt_key(row), bytes(row["image_id"]), block,
+                           row["variant"], refine=False)
         total = int(det.raw_mask.size)
         verifying = total - int(det.raw_mask.sum())
         rate = float(det.raw_mask.sum() / total)
@@ -983,7 +1090,7 @@ def api_verify():
         match = identify(uploaded, con)
         row = match["row"]
         block, variant = int(row["block"]), row["variant"]
-        key, image_id = row["key"], bytes(row["image_id"])
+        key, image_id = db.decrypt_key(row), bytes(row["image_id"])
         stored = decode_png_bytes(bytes(row["png"]))
         meta = db.row_meta(row)
     finally:
@@ -999,8 +1106,8 @@ def api_verify():
     tp, fp, fn, tn = confusion_counts(det.block_mask, truth["block_mask"])
     loc = loc_scores(tp, fp, fn, tn)
 
-    SESSION.clear()
-    SESSION.update(watermarked=stored, tampered=uploaded, original=stored, key=key,
+    SESS().clear()
+    SESS().update(watermarked=stored, tampered=uploaded, original=stored, key=key,
                    image_id=image_id, block=block, variant=variant, det=det,
                    record_id=int(row["id"]), name=Path(filename).name,
                    gt_mask_px=truth["pixel_mask"])
@@ -1037,14 +1144,14 @@ def api_verify():
 def api_verify_repair():
     det = require("det", "Verify an uploaded image first.")
     uploaded = require("tampered", "Verify an uploaded image first.")
-    stored, block, variant = SESSION["watermarked"], SESSION["block"], SESSION["variant"]
+    stored, block, variant = SESS()["watermarked"], SESS()["block"], SESS()["variant"]
 
     rec = recover_image(uploaded, det, block, variant)
-    SESSION["rec"] = rec
-    SESSION["repaired_image"] = rec.image
+    SESS()["rec"] = rec
+    SESS()["repaired_image"] = rec.image
 
     unrec_px = expand_mask(rec.unrecoverable_mask, block)
-    gt_mask_px = SESSION.get("gt_mask_px")
+    gt_mask_px = SESS().get("gt_mask_px")
     if gt_mask_px is None:
         gt_mask_px = expand_mask(det.block_mask, block).astype(bool)
     # Reference is the stored protected copy -- the genuine article, straight from the
@@ -1059,7 +1166,7 @@ def api_verify_repair():
         rho=rec.rho, counts=rec.counts,
         psnr_in_region=rm["psnr_in_region"], ssim_in_region=rm["ssim_in_region"],
         psnr_whole=rm["psnr_whole"], ssim_whole=rm["ssim_whole"],
-        record_id=SESSION.get("record_id"),
+        record_id=SESS().get("record_id"),
     )
 
 
@@ -1082,7 +1189,7 @@ def api_verify_restore():
     """
     det = require("det", "Verify an uploaded image first.")
     uploaded = require("tampered", "Verify an uploaded image first.")
-    stored = SESSION["watermarked"]
+    stored = SESS()["watermarked"]
 
     mask = np.asarray(det.pixel_mask, dtype=bool)  # DETECTED mask -- never ground truth
     pixels_changed = int(np.count_nonzero(np.any(uploaded != stored, axis=2)))
@@ -1096,7 +1203,7 @@ def api_verify_restore():
     # (-> a clean 500 via `guarded`) instead of silently handing back a wrong image.
     assert np.array_equal(out, stored)
 
-    SESSION["restored_image"] = out
+    SESS()["restored_image"] = out
 
     return ok(
         restored=encode_png_data_uri(out),
@@ -1104,7 +1211,7 @@ def api_verify_restore():
         total_blocks=int(det.info["K"]),
         bit_exact=bool(np.array_equal(out, stored)),
         pixels_changed=pixels_changed,
-        record_id=SESSION.get("record_id"),
+        record_id=SESS().get("record_id"),
         note=(
             "This is an EXACT restore from the stored archive copy, not a "
             "reconstruction: every pixel in the flagged region is copied byte-for-byte "
@@ -1131,6 +1238,19 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Fragile Watermark Recovery -- local web app")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--allow-plaintext-keys", action="store_true",
+                     help="#16: start even though the library has plaintext-key rows "
+                          "and WATERMARK_MASTER_KEY is unset. Off by default -- see "
+                          "db.check_plaintext_keys().")
     args = ap.parse_args()
+
+    startup_con = db.connect()
+    try:
+        db.check_plaintext_keys(startup_con, allow_plaintext=args.allow_plaintext_keys)
+    except db.PlaintextKeysError as exc:
+        raise SystemExit(str(exc))
+    finally:
+        startup_con.close()
+
     print(f"Fragile Watermark Recovery -- open http://{args.host}:{args.port}/ in your browser")
     app.run(host=args.host, port=args.port, debug=False, use_reloader=False)

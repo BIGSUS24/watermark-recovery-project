@@ -14,3 +14,5 @@ streamlit==1.61.1
 matplotlib==3.11.1
 python-pptx==1.0.2
 pypdfium2==5.12.1  # optional -- only needed by imageio_any.py's PDF input path
+flask==3.1.2  # webapp's only extra dependency -- required only for webapp/server.py
+cryptography==46.0.2  # webapp/db.py -- AES-256-GCM at-rest encryption for the key column
