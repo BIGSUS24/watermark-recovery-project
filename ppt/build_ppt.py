@@ -189,44 +189,48 @@ def main():
         b("(Screenshot to insert: Streamlit demo UI — key/block-size/tamper-type controls + live metrics)"),
     ])
 
-    # Slide 11 - Results Imperceptibility (table) -- measured, 32-image corpus (8 USC-SIPI + 24 Kodak)
+    # Slide 11 - Results Imperceptibility (table) -- measured, 32-image corpus (8 USC-SIPI + 24 Kodak), Phase C grid
     add_table_slide(
         prs, "Results — Imperceptibility",
         ["Descriptor Variant", "PSNR (dB)", "SSIM"],
         [
-            ["Variant A (DCT) — mean, 32 images", "43.17", "0.9824"],
-            ["Variant B (mean-pooled) — mean, 32 images", "44.23", "0.9844"],
-            ["Lena, Variant A / B", "43.22 / 44.31", "0.9814 / 0.9839"],
+            ["Variant A (DCT) — mean, 32 images", "45.479", "0.9885"],
+            ["Variant C (rate-distortion, default) — mean, 32 images", "45.492", "0.9884"],
+            ["Lena, Variant A / C", "45.73 / 45.71", "0.9883 / 0.9882"],
         ],
-        note="Measured results: PSNR > 43 dB, SSIM > 0.97 on every image. Only 2 LSBs modified per pixel -> analytical reference point ~44.15 dB."
+        note="Measured results: PSNR > 45 dB, SSIM min 0.98031 (Variant A) on every image. LSB shifting (not LSB replacement) keeps distortion to ~0.5 LSB units."
     )
 
-    # Slide 12 - Results Detection & Localization (table) -- measured, block-level, 864 tamper trials
+    # Slide 12 - Results Detection & Localization (table) -- measured, block-level, 1,792 tamper trials, Phase C grid
     add_table_slide(
         prs, "Results — Detection & Localization",
         ["Tamper Type", "Block Prec.", "Block Recall", "Block F1", "Block IoU"],
         [
             ["Copy-paste splicing", "1.0000", "1.0000", "1.0000", "1.0000"],
-            ["Object removal / inpainting", "1.0000", "1.0000", "1.0000", "1.0000"],
+            ["Object removal / inpainting", "1.0000", "0.999981", "1.0000", "1.0000"],
             ["Region crop & refill", "1.0000", "1.0000", "1.0000", "1.0000"],
             ["Noise-block corruption", "1.0000", "1.0000", "1.0000", "1.0000"],
-            ["Overall (864 trials)", "1.0000", "1.0000", "1.0000", "1.0000"],
+            ["Overall (1,792 trials)", "1.0000", "1.0000", "1.0000", "1.0000"],
         ],
-        note="Ground truth is exact (self-generated). Block metrics saturated near 1.0; pixel-level precision mean 0.9489 (gap is block-grid quantization, not false alarms). Security fix: binding the recovery descriptor into the tag eliminated the MSB-preserved miss category (was 0.143 blocks/row, mostly object removal) -- recall is now 1.0000 on every class. Null condition: 0 false positives / 1,802,240 block checks (rule-of-three 95% bound 1.66e-6)."
+        note="Ground truth is exact (self-generated). Block metrics saturated near 1.0; pixel-level precision mean 0.9614 (gap is block-grid quantization, not false alarms). Object removal (inpaint_removal) is the only class that ever misses -- a smooth inpainter can reproduce a tampered block's own MSBs (22 such blocks across the grid, an expected-miss category, not a bug). Null condition: 0 false positives / 1,802,240 block checks (rule-of-three 95% bound 1.66e-6)."
     )
 
-    # Slide 13 - Results Recovery Quality (table) -- measured, Variant A, by tamper ratio
-    # Restructured from tamper-TYPE to tamper-RATIO: that's the axis the most interesting
-    # measured finding (flat in-region PSNR vs. collapsing whole-image PSNR) actually varies over.
+    # Slide 13 - Results Recovery Quality (table) -- measured, all classes/variants, by tamper ratio, Phase C grid
+    # Grid now covers seven tamper ratios (10%-70%), not three -- that's the axis the most
+    # interesting measured finding (flat in-region PSNR, non-collapsing rho) varies over.
     add_table_slide(
         prs, "Results — Recovery Quality",
-        ["Tamper Ratio", "Recoverability (rho)", "In-Region PSNR (dB)", "Whole-Image PSNR (dB)"],
+        ["Tamper Ratio", "Recoverability (rho)", "In-Region PSNR (dB)", "Whole-Image PSNR, unmarked (dB)"],
         [
-            ["10%", "0.9590", "28.96", "33.79"],
-            ["25%", "0.8036", "28.44", "23.87"],
-            ["50%", "0.5335", "28.38", "17.39"],
+            ["10%", "0.9606", "29.38", "33.97"],
+            ["20%", "0.8608", "28.91", "26.45"],
+            ["30%", "0.7503", "29.03", "22.33"],
+            ["40%", "0.6390", "28.95", "19.34"],
+            ["50%", "0.5343", "28.84", "17.36"],
+            ["60%", "0.4421", "28.99", "15.84"],
+            ["70%", "0.3569", "28.92", "14.62"],
         ],
-        note="Key finding: in-region PSNR stays flat as tamper ratio grows; whole-image PSNR collapses. Coverage (rho), not descriptor fidelity, drives whole-image quality. Security/perf trade-off: removing the block-mapping structural leak cost ~1.5 points of rho at every ratio (leaky map 0.9736/0.8353/0.5469 vs flat map 0.9590/0.8036/0.5335) -- the price of removing a bias an attacker with no key could exploit. At 50%, well below Korus & Dziech's 37 dB (reference-sharing degrades gracefully; our 1:1 mapping does not -- see Future Scope)."
+        note="Key finding: in-region PSNR stays flat across all seven ratios (mean 29.00 dB); whole-image PSNR falls steadily because it is driven by coverage (rho), not descriptor fidelity. Rho does NOT collapse: monotone, near-linear, and above the theoretical 1-alpha bound at every ratio (output/sanity_gate_report.txt). At 50%, 17.36 dB whole-image (unmarked) is well below Korus & Dziech's 37 dB (reference-sharing degrades gracefully; our 1:1 mapping does not -- see Future Scope)."
     )
 
     # Slide 14 - Comparison table
@@ -280,7 +284,7 @@ def main():
     add_bullet_slide(prs, "Conclusion", [
         b("Designed and implemented a block-based self-embedding fragile watermarking system"),
         b("Detects tampering, localizes it to individual 8x8 blocks, and recovers the altered content from key-mapped partner-block backups"),
-        b("Achieved imperceptible embedding (PSNR 43.17-44.23 dB across descriptor variants), block-level localization precision 1.0000 / recall 1.0000, and 28.4-29.0 dB in-region recovery PSNR that stays flat across tamper ratio even as whole-image PSNR falls from 33.79 to 17.39 dB"),
+        b("Achieved imperceptible embedding (PSNR 45.479 dB Variant A / 45.492 dB Variant C, SSIM min 0.98031), block-level localization precision 1.0000 / recall 1.0000 (pixel precision 0.9614), and 29.00 dB mean in-region recovery PSNR that stays flat across all seven tamper ratios (10%-70%) even as whole-image PSNR falls from 33.97 to 14.62 dB"),
         b("Evaluated across four tamper types with exact self-generated ground truth"),
         b("Delivered with classical, deterministic Python/OpenCV signal processing — explainable, reproducible, offline, zero-cost"),
         b("Goes one decisive step beyond conventional forgery detectors: they only flag tampering, this restores what was lost"),

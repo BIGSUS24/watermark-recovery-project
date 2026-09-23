@@ -221,13 +221,13 @@ Run in this order. Each step needs the previous one.
 
 ```
 python src/test_e2e.py             # ~2 min   correctness gate. If this fails, trust nothing below.
-python src/run_experiments.py      # HOURS    the full 1,184-run experiment grid
+python src/run_experiments.py      # HOURS    the full 3,232-run experiment grid (use --jobs N to parallelize, ~2.52x on 8 cores)
 python src/sanity_gate.py          # instant  must print "overall: PASS"
 python src/make_tables.py          # instant  writes output/tables/*.tex
 python src/plots.py                # ~1 min   writes output/figures/
 ```
 
-In a hurry? `python src/run_experiments.py --quick` does 10 runs instead of 1,184.
+In a hurry? `python src/run_experiments.py --quick` does 10 runs instead of 3,232.
 
 Every module checks itself in isolation too:
 

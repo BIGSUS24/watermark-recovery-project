@@ -110,8 +110,8 @@ ck(not outside, "no ../output path outside the \\figorbox fallback", outside)
 ck(tex.count("../output") == 2, "only the fallback branch's two ../output uses remain",
    tex.count("../output"))
 # The definition reads \newcommand{\figorbox}[2], so \figorbox{ counts uses only.
-ck(tex.count(r"\newcommand{\figorbox}") == 1 and tex.count(r"\figorbox{") == 2,
-   "figorbox defined once and used twice", tex.count(r"\figorbox{"))
+ck(tex.count(r"\newcommand{\figorbox}") == 1 and tex.count(r"\figorbox{") == 3,
+   "figorbox defined once and used three times", tex.count(r"\figorbox{"))
 ck(tex.count(r"\documentclass[conference]{IEEEtran}") == 1, "still IEEEtran conference class")
 
 for env in ("document", "tabular", "table", "figure", "thebibliography", "abstract",
@@ -120,17 +120,20 @@ for env in ("document", "tabular", "table", "figure", "thebibliography", "abstra
     e = len(re.findall(r"\\end\{%s\}" % env, tex))
     ck(b == e, f"\\begin/\\end {{{env}}} balanced", f"{b}/{e}")
 
-ck(tex.count(r"\begin{tabular}") == 5, "five tabular environments present",
+# Seven tables and three figures since Phase D: #13 added the block-size security
+# table and #12 the localization-granularity comparison, and #40 added the rho(alpha)
+# curve plotted against its 1-alpha bound.
+ck(tex.count(r"\begin{tabular}") == 7, "seven tabular environments present",
    tex.count(r"\begin{tabular}"))
-ck(tex.count(r"\begin{table}") == 5, "five table floats present", tex.count(r"\begin{table}"))
-ck(tex.count(r"\begin{figure}") == 2, "two figure floats present")
+ck(tex.count(r"\begin{table}") == 7, "seven table floats present", tex.count(r"\begin{table}"))
+ck(tex.count(r"\begin{figure}") == 3, "three figure floats present", tex.count(r"\begin{figure}"))
 
 labels = set(re.findall(r"\\label\{([^}]+)\}", tex))
 refs = (set(re.findall(r"\\ref\{([^}]+)\}", tex))
         | set(re.findall(r"\\eqref\{([^}]+)\}", tex)))
 ck(refs <= labels, "every \\ref/\\eqref resolves to a \\label", sorted(refs - labels))
 for lab in ("tab:imperceptibility", "tab:localization", "tab:null", "tab:baseline",
-            "tab:ablation", "fig:recovery_vs_ratio", "fig:qualitative"):
+            "tab:ablation", "fig:rho_vs_ratio", "fig:qualitative"):
     ck(lab in labels, f"label {lab} present")
 
 cites = set()
@@ -139,9 +142,17 @@ for m in re.findall(r"\\cite\{([^}]+)\}", tex):
 bibs = set(re.findall(r"\\bibitem\{([^}]+)\}", tex))
 ck(cites <= bibs, "every \\cite has a \\bibitem", sorted(cites - bibs))
 
-# the tables really carry their numbers rather than having landed empty
-for needle in ("43.17", "0.9824", "1802240", "0.00000166", "26.80", "Korus"):
-    ck(needle in tex, f"table content present: {needle}")
+# The tables really carry their numbers rather than having landed empty. Every value is
+# READ FROM the generated table, never written here as a literal: hardcoded expectations
+# went stale in sanity_gate, make_tables and this file the moment Phase B moved the
+# grid, and a validator asserting last quarter's numbers is worse than no validator.
+for src_name in ("imperceptibility.tex", "localization_recovery.tex",
+                 "null_condition.tex"):
+    gen = (TABLES / src_name).read_text(encoding="utf-8")
+    numbers = re.findall(r"\\d+\\.\\d{2,}", gen)
+    missing = [n for n in numbers if n not in tex]
+    ck(not missing, f"every number in {src_name} reached the paper", missing[:6])
+ck("Korus" in tex, "table content present: Korus")
 
 # every body row's cell count must equal its column spec, or LaTeX stops with
 # "Extra alignment tab has been changed to \cr"

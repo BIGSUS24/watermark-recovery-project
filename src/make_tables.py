@@ -25,7 +25,13 @@ TABLES_DIR = ROOT / "output" / "tables"
 MAIN_BLOCK = 8
 ABLATION_BLOCK = 4
 MAIN_KEY_ID = 0
-RATIOS = ("0.10", "0.25", "0.50")
+SECOND_VARIANT = "C"   # #38: the main grid is (A, C); B is an ablation
+# Derived from the CSV, never a literal: #40 grew the grid from 3 ratios to 7 and the
+# hardcoded tuple silently kept printing a dead "0.25" column of dashes while hiding
+# four measured ratios. Reading the data cannot go stale the next time RATIOS moves.
+def ratios_in(rows: list[dict]) -> tuple[str, ...]:
+    return tuple(sorted({r["tamper_ratio_nominal"] for r in rows
+                         if r["tamper_ratio_nominal"]}, key=float))
 
 # Readable labels matching the paper's own prose (see IEEE_Paper.tex, recall discussion).
 TAMPER_LABELS = {
@@ -102,12 +108,12 @@ def build_imperceptibility(rows: list[dict]) -> str:
     lines = [
         r"\begin{tabular}{lcccc}",
         r"\toprule",
-        r"Image & PSNR-A (dB) & SSIM-A & PSNR-B (dB) & SSIM-B \\",
+        rf"Image & PSNR-A (dB) & SSIM-A & PSNR-{SECOND_VARIANT} (dB) & SSIM-{SECOND_VARIANT} \\",
         r"\midrule",
     ]
     for name in usc_names:
         pa = psnr.get((name, "A")); sa = ssim.get((name, "A"))
-        pb = psnr.get((name, "B")); sb = ssim.get((name, "B"))
+        pb = psnr.get((name, SECOND_VARIANT)); sb = ssim.get((name, SECOND_VARIANT))
         # Plain values, no "$\pm$ 0.00": embedding is deterministic given
         # (image, variant, block, key), so a per-image std over identical rows is
         # exactly zero and printing it is noise that invites a reviewer question.
@@ -122,7 +128,7 @@ def build_imperceptibility(rows: list[dict]) -> str:
         return statistics.mean(vals) if vals else float("nan")
 
     mean_pa, mean_sa = _corpus_mean(psnr, "A"), _corpus_mean(ssim, "A")
-    mean_pb, mean_sb = _corpus_mean(psnr, "B"), _corpus_mean(ssim, "B")
+    mean_pb, mean_sb = _corpus_mean(psnr, SECOND_VARIANT), _corpus_mean(ssim, SECOND_VARIANT)
     lines += [
         r"\midrule",
         rf"\textbf{{Mean ({len(all_names)} images)}} & \textbf{{{_fmt(mean_pa, 2)}}} & "
@@ -142,7 +148,7 @@ def build_imperceptibility(rows: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 def build_localization_recovery(rows: list[dict]) -> str:
-    """4 tamper classes x 3 ratios, Variant A, main grid (block=8) only."""
+    """4 tamper classes x every measured ratio, Variant A, main grid (block=8) only."""
     main_a = [r for r in rows if r["condition"] == "tamper" and r["recovery_variant"] == "A"
              and int(r["block_size"]) == MAIN_BLOCK]
 
@@ -158,7 +164,7 @@ def build_localization_recovery(rows: list[dict]) -> str:
         r"\midrule",
     ]
     for cls in TAMPER_ORDER:
-        for i, ratio_s in enumerate(RATIOS):
+        for i, ratio_s in enumerate(ratios_in(main_a)):
             key = (cls, ratio_s)
             label = esc(TAMPER_LABELS[cls]) if i == 0 else ""
             cells = [_fmt_pm(aggs[k].get(key), d) for k, d in cols]
@@ -171,7 +177,7 @@ def build_localization_recovery(rows: list[dict]) -> str:
     # is deliberately kept as a string by metrics.load_runs_csv (see its NUMERIC_FIELDS
     # comment), so it is converted here, not aggregated via aggregate_by.
     achieved_notes = []
-    for ratio_s in RATIOS:
+    for ratio_s in ratios_in(main_a):
         vals = [float(r["tamper_ratio_achieved"]) for r in main_a if r["tamper_ratio_nominal"] == ratio_s]
         if vals:
             mean = statistics.mean(vals)

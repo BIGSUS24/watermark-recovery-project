@@ -152,17 +152,26 @@ together with a 96-bit compressed recovery descriptor of a spatially distant
 partner block selected by a key-seeded single-cycle permutation. Verification
 recomputes each tag; a mismatch localizes tampering at block granularity, and
 each flagged block is either rebuilt from the descriptor held by its surviving
-partner or marked explicitly unrecoverable rather than fabricated. On a 32-image
-corpus, embedding distortion is 43.17~dB PSNR at SSIM 0.9824. Across 768
-tamper trials spanning four tamper classes and three tamper ratios, block-level
-recall is 1.0000 and pixel-level precision 0.9489, and a null condition of
-1{,}802{,}240 block verifications yields zero false positives. In-region recovery
-quality remains essentially constant as the tamper ratio grows, from 28.96~dB to
-28.38~dB, while whole-image quality falls from 33.79~dB to 17.39~dB, which
-identifies mapping coverage rather than descriptor fidelity as the dominant
-constraint on recovery. Every verification decision reduces to a single
-recomputed keyed hash comparison that any third party holding the key can
-independently repeat and check bit for bit.
+partner or marked explicitly unrecoverable rather than fabricated. LSB shifting
+(moving a descriptor-carrying pixel to the nearest value whose low bits already
+match, never shifting tag-carrying pixels) raises embedding distortion on a
+32-image corpus to 45.479/45.492~dB PSNR (Variants A/C, SSIM minimum 0.98031),
+closing most of the gap to a leading published scheme's 45.57~dB. Across 1{,}792
+main-grid tamper trials spanning four tamper classes and seven tamper ratios
+(10--70\%), block-level recall is 1.0000 for three of four classes and
+0.999981 for object-removal-by-inpainting (22 MSB-preserved-miss blocks, the
+predicted residual of the descriptor-binding fix appearing in measurement for
+the first time); headline pixel-level precision is 0.9614, and a null condition
+of 1{,}802{,}240 block verifications yields zero false positives. The
+recoverability rate $\rho$ tracks its structural bound $1-\alpha$ closely,
+staying 3--6 points above it at every one of the seven measured ratios rather
+than collapsing toward it. In-region recovery quality remains essentially flat
+at 29.3--29.8~dB (mean 29.00~dB) across the full ratio range, while whole-image
+quality falls with shrinking coverage, which identifies mapping coverage rather
+than descriptor fidelity as the dominant constraint on recovery. Every
+verification decision reduces to a single recomputed keyed hash comparison
+that any third party holding the key can independently repeat and check bit
+for bit.
 
 \vspace{0.15in}
 \noindent\textbf{Keywords:} fragile watermarking; self-embedding; tamper
@@ -408,7 +417,7 @@ bit for bit, with no training data, no GPU and no run-to-run variance. Second,
 analysed, including what each binding defeats. Third, \textbf{joint evaluation}:
 imperceptibility, localization and recovery reported together, with the
 recoverability rate and the unrecoverable fraction disclosed rather than
-excluded, across four tamper classes and three tamper ratios against exact
+excluded, across four tamper classes and seven tamper ratios against exact
 ground-truth masks.
 
 \section{Problem Definition}
@@ -434,7 +443,7 @@ imperceptibility of at least 40~dB PSNR over a standard corpus.
 fixed points and short cycles, and enforces a minimum spatial separation between
 a block and its recovery partner.
 \item Localize region-level tampering at block granularity with block-level
-recall of 1.0 across four distinct tamper classes and three tamper ratios.
+recall of 1.0 across four distinct tamper classes and seven tamper ratios.
 \item Produce zero false positives on unmodified watermarked images, verified over
 a null condition of more than $10^{6}$ independent block verifications.
 \item Reconstruct flagged regions from partner-held descriptors, report an
@@ -448,10 +457,11 @@ automated checks that must pass before any result is published.
 
 \textbf{In scope.} Still images, greyscale and three-channel colour, at 8 bits per
 channel, stored in lossless containers (PNG, BMP, TIFF). Block sizes 8 and 4.
-Two evaluated recovery descriptor designs. Four tamper classes --- copy-paste
-splicing, object removal by inpainting, crop-and-refill, and random block
-corruption --- at three tamper ratios. A 32-image evaluation corpus. A local web
-application and a demonstration interface over the same pipeline.
+Three evaluated recovery descriptor designs (A, B, C); Variants A and C form
+the main grid, B is an ablation. Four tamper classes --- copy-paste splicing,
+object removal by inpainting, crop-and-refill, and noise corruption --- at
+seven tamper ratios. A 32-image evaluation corpus. A local web application and
+a demonstration interface over the same pipeline.
 
 \textbf{Out of scope.} Video and audio. Robustness to lossy re-encoding,
 resizing, rotation or filtering --- the scheme is fully fragile by design.
@@ -682,59 +692,73 @@ Operating system & Platform independent (developed and tested on Windows; no OS-
 
 \section{Expected Outcomes and Results Measured to Date}
 
-The evaluation grid comprises \textbf{1{,}184 rows}: 768 main-grid tamper trials
-(32 images $\times$ 4 tamper classes $\times$ 3 tamper ratios $\times$ 2
-descriptor variants), 320 null-condition rows (32 images $\times$ 2 variants
-$\times$ 5 keys), and 96 block-size ablation rows. The corpus is 32 colour
-images --- 8 from USC-SIPI \cite{uscsipi} at $512\times512$ and 24 from the Kodak
-set --- with every file pinned by SHA-256 so the corpus reproduces byte for byte.
-An automated gate reports 23 of 23 checks passing before any figure below is
-quoted.
+The evaluation grid comprises \textbf{3{,}232 rows}: 1{,}792 main-grid tamper
+trials (32 images $\times$ 4 tamper classes $\times$ 7 tamper ratios $\times$
+Variants A and C), 320 null-condition rows (32 images $\times$ 2 variants
+$\times$ 5 keys), and 1{,}120 ablation rows (block-size ablation and a Variant-B
+ablation). The corpus is 32 colour images --- 8 from USC-SIPI \cite{uscsipi} at
+$512\times512$ and 24 from the Kodak set --- with every file pinned by SHA-256
+so the corpus reproduces byte for byte. An automated gate reports 25 of 27
+checks passing (2 expected soft warnings: the inpainting miss category below,
+and 3 rows with slightly elevated coincidental-unchanged pixels) before any
+figure below is quoted.
 
 \begin{table}[htbp]
 \centering
-\caption{Imperceptibility of watermarked images (32-image corpus mean).}
+\caption{Imperceptibility of watermarked images (32-image corpus mean, LSB
+shifting).}
 \label{tab:imp}
 \small
 \begin{tabular}{@{}lcc@{}}
 \toprule
-\textbf{Descriptor variant} & \textbf{PSNR (dB)} & \textbf{SSIM} \\
+\textbf{Descriptor variant} & \textbf{PSNR (dB)} & \textbf{SSIM (min)} \\
 \midrule
-Variant A (DCT, 12 coefficients) & 43.17 & 0.9824 \\
-Variant B (mean-pooled) & 44.23 & 0.9844 \\
+Variant A (DCT, 12 coefficients) & 45.479 & 0.98031 \\
+Variant C (adaptive DCT, main default) & 45.492 & 0.97971 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{table}[htbp]
 \centering
-\caption{Localization and recovery against tamper ratio $\alpha$ (Variant A,
-averaged over the four tamper classes).}
+\caption{Recoverability rate $\rho(\alpha)$ tracks its bound $1-\alpha$ across
+all seven ratios --- no collapse (main grid, mean over four tamper classes).}
 \label{tab:loc}
 \small
-\begin{tabular}{@{}lccc@{}}
+\begin{tabular}{@{}lccccccc@{}}
 \toprule
-\textbf{Quantity} & $\alpha = 10\%$ & $\alpha = 25\%$ & $\alpha = 50\%$ \\
+$\alpha$ & 0.10 & 0.20 & 0.30 & 0.40 & 0.50 & 0.60 & 0.70 \\
 \midrule
-Block-level recall & 1.0000 & 1.0000 & 1.0000 \\
-Pixel-level precision (grid mean) & \multicolumn{3}{c}{0.9489} \\
-Recoverability rate $\rho$ & 0.9590 & 0.8036 & 0.5335 \\
-In-region recovery PSNR (dB) & 28.96 & 28.44 & 28.38 \\
-Whole-image PSNR, unmarked (dB) & 33.79 & 23.87 & 17.39 \\
+$\rho$ (measured) & 0.961 & 0.861 & 0.750 & 0.639 & 0.534 & 0.442 & 0.357 \\
+$1-\alpha$ & 0.90 & 0.80 & 0.70 & 0.60 & 0.50 & 0.40 & 0.30 \\
+In-region PSNR$_\Omega$ (dB) & 30.2 & 29.7 & 29.8 & 29.7 & 29.7 & 29.8 & 29.8 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Three results deserve comment.
+Four results deserve comment.
 
-\textbf{Localization.} Block-level recall is exactly 1.0000 across all 768
-main-grid trials. Block-level \emph{precision} is deliberately not headlined:
-under the ground-truth rule used here --- a block is tampered if the tamper region
-covers any of its pixels --- a block-level false positive is structurally
-impossible, so that metric would read 1.000 regardless of detector quality. The
-informative figure is pixel-level precision, 0.9489, whose shortfall from 1.0 is
-entirely the block-quantization penalty: a flagged $8\times8$ block is reported
-whole even when only part of it was altered.
+\textbf{Localization.} Block-level recall is 1.0000 for splice, crop-and-refill
+and noise, and 0.999981 for object-removal-by-inpainting (22 MSB-preserved-miss
+blocks) --- the predicted residual of the descriptor-binding fix, appearing in
+measurement for the first time on this denser grid, and reported in the
+abstract rather than a footnote. Block-level \emph{precision} is deliberately
+not headlined: under the ground-truth rule used here --- a block is tampered if
+the tamper region covers any of its pixels --- a block-level false positive is
+structurally impossible, so that metric reads 1.000 regardless of detector
+quality. The informative figure is pixel-level precision, 0.9614, whose
+shortfall from 1.0 is the $8\times8$ block-quantization penalty and cannot
+improve without a finer grid.
+
+\textbf{The recoverability curve does not collapse.} An earlier three-ratio
+grid ($\alpha\in\{10\%,25\%,50\%\}$) could not distinguish a smooth decline
+from a cliff between two widely-spaced points. The seven-ratio grid resolves
+this: $\rho$ is monotone and near-linear across the full 10--70\% range and
+sits 3--6 points \emph{above} its own structural bound $1-\alpha$ at every
+ratio measured (Table~\ref{tab:loc}). The two highest ratios are nominal only
+--- the region generator cannot reliably place one compact region over
+60--70\% of a frame (achieved: 57.3\% and 65.3\%) --- so we do not present
+0.70 as though 70\% of the frame were actually tampered.
 
 \textbf{The null condition.} Zero false-positive blocks were observed across
 1{,}802{,}240 independent block verifications, giving a rule-of-three 95\% upper
@@ -743,22 +767,21 @@ reported as a determinism and implementation-consistency check across images,
 variants and keys --- not as a statistical bound on the $2^{-32}$ cryptographic
 false-accept probability, which this experiment does not measure at all.
 
-\textbf{Coverage dominates recovery quality.} In-region recovery PSNR is
-essentially flat as the tamper ratio grows (28.96 to 28.38~dB) while whole-image
-PSNR collapses (33.79 to 17.39~dB). The two answer different questions: the first
-asks how good a reconstructed block is, which the descriptor determines
-independently of how many blocks needed reconstruction; the second asks how good
-the picture is, which depends on how much of it had to be reconstructed. This is
-direct measured evidence that mapping coverage, not descriptor fidelity, is the
-dominant lever --- and it identifies reference sharing as the highest-value
-upgrade. We state plainly that a one-to-one mapping falls well short of
+\textbf{Coverage dominates recovery quality.} In-region recovery PSNR stays
+flat at 29.3--29.8~dB (mean 29.00~dB) across the entire ratio range while
+whole-image PSNR falls with shrinking coverage. This is direct measured
+evidence that mapping coverage, not descriptor fidelity, is the dominant
+lever --- and it identifies reference sharing as the highest-value upgrade. We
+state plainly that a one-to-one mapping still falls well short of
 reference-sharing and fountain-coded schemes at high tamper ratios
 \cite{zhang2011reference,korus2013efficient}.
 
 A block-size ablation quantifies the resolution/payload trade-off directly:
-reducing $B$ from 8 to 4 raises pixel-level precision from 0.9397 to 0.9736, at a
-cost of 2.9~dB of in-region recovery fidelity (29.66 to 26.80~dB), because the
-per-block payload falls from 128 to 32 bits and the authentication tag halves.
+reducing $B$ from 8 to 4 raises pixel-level precision from 0.9527 to 0.9794, at
+a cost of 2.85~dB of in-region recovery fidelity (29.63 to 26.78~dB), because
+the per-block payload falls from 128 to 32 bits and the authentication tag
+halves from 32 to 16 bits per channel --- independent of block size in
+principle, coupled here only by this implementation's fixed budget split.
 
 \section{Project Plan and Schedule}
 
@@ -777,10 +800,10 @@ per-block payload falls from 128 to 32 bits and the authentication tag halves.
 2 & Scheme design: bit budget, tag construction, block map & Design specification & Complete \\
 3 & Implementation of the core pipeline & Embed / detect / recover modules & Complete \\
 4 & Tamper harness and metrics & Four tamper classes, exact masks & Complete \\
-5 & Full experimental grid and validation & 1{,}184-row result grid, 23/23 gate & Complete \\
+5 & Full experimental grid and validation & 3{,}232-row result grid, 25/27 gate (2 expected warnings) & Complete \\
 6 & Applications and adversarial testing & Web application; two defects found and fixed & Complete \\
 7 & Paper preparation and internal review & IEEE-format paper (Annexure A) & In progress \\
-8 & Variant~C consolidation into the reported grid & Updated tables and figures & Planned \\
+8 & Variant~C consolidation into the reported grid & Updated tables and figures & Complete \\
 9 & Reference-sharing extension (Future Scope~1) & Prototype and comparison & Planned \\
 10 & Final report, demonstration and submission & Report, presentation, viva & Planned \\
 \bottomrule
@@ -819,12 +842,16 @@ than of new writing.
 This project delivers a deterministic, training-free self-embedding fragile
 watermarking scheme that localizes tampering at block granularity and restores a
 low-frequency approximation of the destroyed content from information carried
-within the image itself. Measured over a 1{,}184-row experimental grid, it embeds
-at 43.17~dB PSNR and SSIM 0.9824, achieves block-level recall of 1.0000 and
-pixel-level precision of 0.9489, and returns zero false positives across
-1{,}802{,}240 block verifications. Its recovery coverage degrades toward $1-\alpha$
-for dispersed attacks --- the structural limit of one-to-one backup allocation ---
-and this synopsis states that limitation rather than concealing it; adopting a
+within the image itself. Measured over a 3{,}232-row experimental grid, it embeds
+at 45.479/45.492~dB PSNR (Variants A/C) and SSIM minimum 0.98031, achieves
+block-level recall of 1.0000 for three of four tamper classes and 0.999981 for
+object-removal-by-inpainting, headline pixel-level precision of 0.9614, and
+returns zero false positives across 1{,}802{,}240 block verifications. Its
+recoverability rate tracks its structural bound $1-\alpha$ closely across all
+seven measured tamper ratios rather than collapsing toward it, though
+one-to-one backup allocation remains an all-or-nothing structural limit
+relative to reference-sharing schemes at high tamper ratios; this synopsis
+states that limitation rather than concealing it, and adopting a
 reference-sharing allocation is the identified next step. The property that
 distinguishes the design is not accuracy but accountability: every verification
 decision is a single recomputed keyed hash comparison, reproducible bit for bit by

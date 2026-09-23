@@ -70,7 +70,7 @@ ABSTRACT = (
     "permutation. Verification will recompute each tag to localize tampering at block "
     "granularity, rebuild flagged blocks from surviving partners, and mark the "
     "remainder explicitly unrecoverable rather than fabricating content. The system "
-    "will be evaluated across four tamper classes and three tamper ratios, reporting "
+    "will be evaluated across four tamper classes and seven tamper ratios, reporting "
     "imperceptibility, localization and recovery together."
 )
 
@@ -265,7 +265,7 @@ OBJECTIVES = [
     "between a block and its recovery partner, so that a localized attack cannot "
     "destroy both.",
     "To localize region-level tampering at block granularity with block-level recall "
-    "of 1.0 across four distinct tamper classes and three tamper ratios.",
+    "of 1.0 across four distinct tamper classes and seven tamper ratios.",
     "To produce zero false positives on unmodified watermarked images, verified over "
     "a null condition of more than one million independent block verifications.",
     "To reconstruct flagged regions from partner-held descriptors, report an explicit "
@@ -281,7 +281,7 @@ SCOPE = [
     "that the resolution against payload trade-off can be measured rather than "
     "asserted. Two recovery descriptor designs to be evaluated against each other. "
     "Four tamper classes \u2014 copy-paste splicing, object removal by inpainting, "
-    "crop-and-refill, and random block corruption \u2014 at three tamper ratios. A "
+    "crop-and-refill, and random block corruption \u2014 at seven tamper ratios. A "
     "fixed 32-image evaluation corpus, every file pinned by SHA-256 so the corpus "
     "reproduces byte for byte. A local web application and a demonstration interface "
     "over the same pipeline.",

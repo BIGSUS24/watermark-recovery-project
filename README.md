@@ -127,11 +127,15 @@ Three descriptor variants share that container. **A** keeps 12 zig-zag DCT
 coefficients at a fixed 8 bits each; **B** keeps 2x2 block means; **C** is the
 default, and spends the same 96 bits on 31-34 variable-width coefficient fields
 chosen by rate-distortion optimization, plus one bit selecting between two
-allocation tables. C measures **+3.43 dB mean and +2.52 dB worst-case** recovered
-fidelity over A across 13 corpus images its tables were never fitted on -- so it is
-never the worse choice -- and roughly +4 dB on scanned-document content, which is A's
-worst case because text is broadband and 12 coefficients is a severe low-pass filter.
-The paper's experiment grid reports A and B; C's tables and their measured gain are
+allocation tables. Measured on the Phase C grid (`output/runs.csv`, in-region
+recovery PSNR, block size 8, all 32 corpus images), C beats A by **+2.63 dB mean,
++1.40 dB worst-case** (smallest per-image gain, `tiffany`) -- every one of the 32
+images improves, so it is never the worse choice. That replaces two stale,
+disagreeing figures: this file previously said +3.43/+2.52 dB and
+`src/payload.py` says +3.19/+2.33 dB. Neither matches the Phase C grid, so both
+were wrong; the figures above are the recomputed real ones.
+The paper's experiment grid now reports **A and C** -- B was demoted to an
+ablation-only block in Phase C. C's tables and their measured gain are
 reproduced by `python src/fit_variant_c.py`, which refits them and asserts they match
 the shipped constants.
 
@@ -140,6 +144,11 @@ the shipped constants.
 **Setting this up on a new machine? Follow [INSTALL.md](INSTALL.md)** — every command
 spelled out, including installing Python, with a troubleshooting section for the
 things that actually go wrong.
+
+Planning to actually run this against real images outside a research corpus?
+Read [DEPLOYMENT.md](DEPLOYMENT.md) first -- a single lossy step anywhere in the
+pipeline (JPEG, a CDN's auto-optimisation, WhatsApp/Telegram, a resize) destroys the
+watermark permanently, and it destroys it silently.
 
 Short version, once dependencies and the corpus are in place:
 
@@ -236,6 +245,48 @@ deployment, where keys belong in an OS keyring, HSM, or KMS and never beside the
 artefact they authenticate. The scheme's entire security argument rests on the
 attacker not holding the key.
 
+## What Phase A changed (things you'll notice)
+
+- **Per-tab sessions.** Each browser tab now gets its own Protect/Damage/Check/Repair
+  state (`webapp/server.py`'s `SESS()`, keyed off a signed `flask.session` cookie)
+  instead of one global dict every open tab used to clobber.
+- **Keys encrypted at rest.** The library's `key` column is AES-256-GCM encrypted
+  under `WATERMARK_MASTER_KEY` (`webapp/db.py`). The app now refuses to start
+  against a plaintext-key database unless you pass `--allow-plaintext-keys`.
+  Whoever holds `WATERMARK_MASTER_KEY` can still decrypt everything -- a real
+  deployment keeps that key in an HSM/KMS/OS keyring, not an env var, and
+  rotates it.
+- **Soft delete and `/api/export`.** Deleting a library row now sets `deleted_at`
+  instead of removing it, so a mistaken delete is recoverable; `POST /api/export`
+  zips every non-deleted protected PNG plus a `manifest.json` describing each row
+  (keys are included only if you supply the master key in the request body).
+  SQLite now runs `PRAGMA journal_mode=WAL`.
+- **128x128 minimum, and a relaxation warning.** Images under 128x128 are refused
+  outright rather than protected under a silently weaker guarantee. When the
+  block-mapping pass cannot hold its target minimum separation, it now says so --
+  a warning banner plus a `relaxations` count in the API response
+  (`src/blockmap.py`, `webapp/server.py`) -- instead of silently shipping a
+  closer-than-intended partner map.
+- **Shape-mismatch rejection on verify.** An uploaded file is matched to a
+  library record by exact height/width before anything else runs; a resize or a
+  90-degree rotation moves every block boundary, so a shape mismatch is now a
+  named, explained rejection instead of a bare lookup miss.
+- **Lossless WebP accepted.** `src/imageio_any.py` sniffs the RIFF chunk id right
+  after the `WEBP` tag: `VP8L` (true lossless WebP) is now in `LOSSLESS` and
+  accepted; `VP8` (lossy) and `VP8X` (extended container -- telling a wrapped
+  VP8L from a wrapped VP8 would mean walking the whole chunk list, so it is
+  called lossy, the conservative direction) are still refused.
+- **RGBA auto-composite.** `embed.py` and `recover.py` now route input through
+  `imageio_any`, so an RGBA source is composited instead of hard-rejected.
+- **`--jobs N` on the experiment runner.** `src/run_experiments.py` now runs the
+  grid through a `ProcessPoolExecutor` (`--jobs N`, default `os.cpu_count()`);
+  measured 2.52x on eight cores, with output byte-identical to `--jobs 1` --
+  that identity check is Gate A's own condition for accepting the parallel path.
+- **#5: a readable rejection, not a raw 400.** Uploading a lossy file for
+  verification (JPEG, lossy WebP, GIF, a rasterised PDF page) now returns a
+  specific explanation of why a lossy re-encode destroys the two LSB planes the
+  watermark lives in, instead of an unexplained HTTP 400.
+
 ## Reproducing the results
 
 Run in this order -- each stage depends on the previous one's output:
@@ -244,7 +295,7 @@ Run in this order -- each stage depends on the previous one's output:
 python samples/fetch_corpus.py     # downloads + SHA-256-pins the 32-image corpus into samples/manifest.csv
 python src/fit_variant_c.py        # re-derives variant C's tables; asserts they match payload.py
 python src/test_e2e.py             # KEYSTONE GATE -- must pass before any other result is trusted
-python src/run_experiments.py      # full 1,184-run grid -> output/runs.csv (use --quick for a 10-row smoke run)
+python src/run_experiments.py      # full 3,232-run grid -> output/runs.csv (use --quick for a 10-row smoke run)
 python src/sanity_gate.py          # checks runs.csv against measured bands; must print "overall: PASS"
 python src/make_tables.py          # runs.csv -> output/tables/*.tex  (aborts if the gate fails)
 python src/plots.py                # runs.csv -> output/figures/
@@ -300,7 +351,7 @@ only for the null-condition implementation-robustness check, not for any
 reported result). The image identifier bound into every HMAC is
 `default_image_id(stem, shape, block)` in `src/payload.py`, a deterministic
 `stem|HxW|B` string -- not a random nonce -- specifically so the whole
-1,184-run grid is bit-reproducible across machines and re-runs. Production
+3,232-run grid is bit-reproducible across machines and re-runs. Production
 deployment should use a fresh random >=128-bit nonce per image
 (`secrets.token_bytes(16)`) instead; both conventions are documented together
 in `payload.py` so the difference is never accidentally load-bearing.
@@ -346,7 +397,7 @@ not obvious:
    downstream sees them, and `recover.py:110-114` derives one `T`/`U`/`R` for all
    three. Per-channel recovery would need a tri-state model that `rho = 1 - |U|/|T|`
    has no vocabulary for, a new library column so existing records still recover
-   correctly, and a re-run of the 1,184-row grid with every table and figure redrawn.
+   correctly, and a re-run of the 3,232-row grid with every table and figure redrawn.
 
 So the shipped answer is the cheap one, quarantined as described above, and the
 honest route to a perfect file stays "restore exactly from library". The genuinely
