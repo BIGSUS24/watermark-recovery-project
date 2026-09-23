@@ -139,11 +139,11 @@ Signature, Student 3 & Signature, Student 4 \\
 
 Editing an image convincingly is now a task of seconds, while the formats in
 which images are stored protect nothing about their content. Passive forensic
-detectors answer only half of the question a practitioner asks: they may indicate
-that a region was altered, but they cannot restore the content that was
-destroyed, and their modern learned instances require annotated training corpora,
-accelerator hardware at inference time, and produce per-pixel confidence scores
-that are not explainable under cross-examination. This project develops the
+detectors answer only half the question a practitioner asks: they may
+indicate that a region was altered, but cannot restore what was destroyed,
+and their modern learned instances require annotated training corpora,
+accelerator hardware at inference time, and produce per-pixel confidence
+scores not explainable under cross-examination. This project develops the
 active alternative. A deterministic, training-free self-embedding fragile
 watermarking scheme partitions an image into $8 \times 8$ blocks and hides, in
 the two least-significant bit-planes of every block, a 32-bit keyed
@@ -151,27 +151,27 @@ authentication tag computed over that block's six most-significant bit-planes,
 together with a 96-bit compressed recovery descriptor of a spatially distant
 partner block selected by a key-seeded single-cycle permutation. Verification
 recomputes each tag; a mismatch localizes tampering at block granularity, and
-each flagged block is either rebuilt from the descriptor held by its surviving
-partner or marked explicitly unrecoverable rather than fabricated. LSB shifting
-(moving a descriptor-carrying pixel to the nearest value whose low bits already
-match, never shifting tag-carrying pixels) raises embedding distortion on a
-32-image corpus to 45.479/45.492~dB PSNR (Variants A/C, SSIM minimum 0.98031),
-closing most of the gap to a leading published scheme's 45.57~dB. Across 1{,}792
-main-grid tamper trials spanning four tamper classes and seven tamper ratios
-(10--70\%), block-level recall is 1.0000 for three of four classes and
-0.999981 for object-removal-by-inpainting (22 MSB-preserved-miss blocks, the
-predicted residual of the descriptor-binding fix appearing in measurement for
-the first time); headline pixel-level precision is 0.9614, and a null condition
-of 1{,}802{,}240 block verifications yields zero false positives. The
-recoverability rate $\rho$ tracks its structural bound $1-\alpha$ closely,
-staying 3--6 points above it at every one of the seven measured ratios rather
-than collapsing toward it. In-region recovery quality remains essentially flat
-at 29.3--29.8~dB (mean 29.00~dB) across the full ratio range, while whole-image
-quality falls with shrinking coverage, which identifies mapping coverage rather
-than descriptor fidelity as the dominant constraint on recovery. Every
-verification decision reduces to a single recomputed keyed hash comparison
-that any third party holding the key can independently repeat and check bit
-for bit.
+each flagged block is either rebuilt from the descriptor held by its
+surviving partner or marked explicitly unrecoverable rather than fabricated.
+LSB shifting (moving a descriptor-carrying pixel to the nearest value whose
+low bits already match, never shifting tag-carrying pixels) raises embedding
+distortion on a 32-image corpus to 45.479/45.492~dB PSNR (Variants A/C, SSIM
+minimum 0.98031), closing most of the gap to a leading published scheme's
+45.57~dB. Across 1{,}792 main-grid tamper trials spanning four tamper classes
+and seven tamper ratios (10--70\%), block-level recall is 1.0000 for three of
+four classes and 0.999981 for object-removal-by-inpainting (22
+MSB-preserved-miss blocks, the predicted residual of the descriptor-binding
+fix appearing in measurement for the first time); headline pixel-level
+precision is 0.9614, and a null condition of 1{,}802{,}240 block verifications
+yields zero false positives. The recoverability rate $\rho$ tracks its
+structural bound $1-\alpha$ closely, staying 3--6 points above it at every one
+of seven measured ratios rather than collapsing toward it. In-region recovery
+quality remains essentially flat at 29.3--29.8~dB (mean 29.00~dB) across the
+full ratio range while whole-image quality falls with shrinking coverage,
+identifying mapping coverage rather than descriptor fidelity as the dominant
+constraint on recovery. Every verification decision reduces to a single
+recomputed keyed hash comparison any third party holding the key can
+independently repeat and check bit for bit.
 
 \vspace{0.15in}
 \noindent\textbf{Keywords:} fragile watermarking; self-embedding; tamper
@@ -179,8 +179,8 @@ localization; image authentication; content recovery; block mapping; keyed
 hashing; image forensics.
 
 \newpage
+\setcounter{tocdepth}{1}
 \tableofcontents
-\newpage
 
 % ------------------------------------------------------------------ sections
 \section{Introduction}
@@ -190,159 +190,108 @@ increasingly unsafe: that the pixels presented are the pixels captured.
 Region-level manipulation --- pasting an object from one photograph into another,
 erasing an object with an inpainting tool, or replacing a cropped region with
 plausible texture --- is available in free software and, with diffusion-based
-generative editors, requires neither skill nor time. The consequences are
-concrete rather than hypothetical: a radiological study with a lesion removed, a
-vehicle-damage photograph submitted with an insurance claim, a surveillance frame
-entered into a legal record, or a remote-sensing tile used in an environmental
-dispute all derive their utility from an integrity that the image format itself
-does not protect.
+generative editors, requires neither skill nor time. A radiological study with a
+lesion removed, a vehicle-damage photograph submitted with an insurance claim, a
+surveillance frame entered into a legal record, or a remote-sensing tile used in
+an environmental dispute all derive their utility from an integrity that the
+image format itself does not protect.
 
 Two broad families of countermeasures exist. \emph{Passive} (blind) forensics
-analyses the received image alone, searching for statistical inconsistencies in
-noise residuals, compression history, colour filter array traces or resampling
-artefacts; its modern instances are learned \cite{zhou2018learning,wu2019mantranet}.
-\emph{Active} approaches insert authentication information into the image before
-distribution, so that verification becomes a decision about self-consistency
-rather than an inference about provenance; fragile watermarking belongs to this
-second family \cite{wong2001secret,rey2002survey}.
+analyses the received image alone for statistical inconsistencies in noise
+residuals, compression history, colour filter array traces or resampling
+artefacts, its modern instances learned \cite{zhou2018learning,wu2019mantranet}.
+\emph{Active} approaches insert authentication information before
+distribution, so verification becomes self-consistency rather than provenance
+inference; fragile watermarking belongs to this second family
+\cite{wong2001secret,rey2002survey}. Even a perfect detector answers only
+half of the practitioner's question: knowing precisely \emph{which} pixels of
+a radiograph were altered does not restore the diagnostic content that was
+overwritten, and passive restoration is necessarily generative, producing
+content that is plausible but bears no evidentiary relationship to the
+original -- worse than no restoration at all when the artefact is evidence.
 
-Even a perfect detector answers only half of the practitioner's question. Knowing
-precisely \emph{which} pixels of a radiograph were altered does not restore the
-diagnostic content that was overwritten, and in the passive paradigm restoration
-is necessarily generative: an inpainting network produces content that is
-plausible but bears no evidentiary relationship to the original, which is worse
-than no restoration at all when the artefact is evidence. What is required is a
-mechanism by which the \emph{original} content --- even a coarse approximation of
-it --- survives the attack and can be reinstated. Self-embedding watermarking, in
-the line of work following Fridrich and Goljan \cite{fridrich1999selfembedding},
-provides exactly this: a compressed representation of each region is hidden
-elsewhere \emph{within the same image}, so that a spatially localized attack
-destroys a region but not its backup.
-
-This synopsis describes a complete, reproducible localization-and-recovery
-pipeline built on that principle which evaluates the two capabilities
-\emph{together}. Section~2 gives the motivation; Section~3 surveys the literature
-and the market; Sections~4--6 define the problem, objectives and scope;
-Section~7 presents the methodology and Section~8 the mathematical model;
-Sections~9--10 list modules and requirements; Section~11 reports the outcomes
-measured to date; and Sections~12--14 give the plan of work, target publication
-venues and conclusion.
+What is required is a mechanism by which the \emph{original} content --- even a
+coarse approximation --- survives the attack and can be reinstated.
+Self-embedding watermarking, in the line of work following Fridrich and
+Goljan \cite{fridrich1999selfembedding}, provides exactly this: a compressed
+representation of each region is hidden elsewhere \emph{within the same
+image}, so a spatially localized attack destroys a region but not its
+backup. This synopsis describes a complete, reproducible pipeline built on
+that principle which evaluates both capabilities \emph{together}.
 
 \section{Motivation and Relevance of the Work}
 
-Three observations motivate this work.
+Beyond Section~1's case for restoration over detection alone, two further
+observations matter for deployment relevance. Learned-detector economics are
+frequently understated: annotated corpora, accelerator hardware excluding
+embedded devices and hospital gateways, and outputs not explainable under
+cross-examination -- a per-pixel confidence of $0.78$ is not an argument,
+whereas every positive detection here reduces to a single recomputed keyed
+hash comparison. And the literature tends to report localization and recovery
+separately, letting a healthy in-region reconstruction figure flatter a
+scheme when the recoverable fraction is left undisclosed; this project treats
+the joint report as a requirement.
 
-First, \textbf{detection without restoration is insufficient} in exactly those
-domains where image integrity matters most. A verifier who learns that a region of
-a medical scan was altered still cannot say what was there, and a generative
-reconstruction is not an answer because its content is invented.
-
-Second, \textbf{the deployment economics of learned detectors are frequently
-understated}: annotated corpora whose bias bounds what the model can see,
-accelerator hardware at inference time that excludes embedded devices and hospital
-gateways, and outputs that are not explainable under cross-examination. A
-per-pixel confidence of $0.78$ is not an argument. By contrast, every positive
-detection here is the statement ``the 32-bit keyed tag stored in block $i$ does
-not equal the tag recomputed from block $i$'s current content'' --- verifiable,
-repeatable and auditable, with no training set, no GPU and no run-to-run variance.
-
-Third, \textbf{the literature tends to report localization and recovery
-separately}. Quoting a healthy in-region reconstruction figure without disclosing
-what fraction of the flagged region was recoverable at all can flatter a scheme
-substantially, so this project treats the joint report --- localization quality,
-recoverability rate and recovery fidelity in one table --- as a requirement.
-
-The application domains follow: forensic evidence archives, media authentication
-at ingest, medical imaging integrity in PACS, legal and official document scans,
-insurance claim verification, and self-authenticating camera or scanner firmware.
-All share the property that makes an active scheme viable --- the acquisition
-pipeline is under institutional control, so cooperation at capture time is
-realistic.
+Relevant application domains: forensic evidence archives, media
+authentication at ingest, medical imaging integrity in PACS, legal and
+official document scans, insurance claim verification, and
+self-authenticating camera or scanner firmware --- all sharing the property
+that makes an active scheme viable, an acquisition pipeline under
+institutional control.
 
 \section{Literature Survey and Market Survey}
 
-\subsection{Passive forensics and learned detectors}
+\subsection{Passive, active, and self-embedding approaches}
 
-Passive methods analyse the received image alone. Zhou \emph{et al.}
-\cite{zhou2018learning} use a two-stream RGB and noise-residual architecture for
-splice localization, and ManTra-Net \cite{wu2019mantranet} uses self-supervised
-anomaly features to localize forgeries without training on the specific
-manipulation type. Their structural advantage is decisive and must be
-acknowledged: they need no cooperation from the acquisition device, which no
-active scheme can match. Their costs are the annotated corpora, the GPU at
-inference, the unexplainable output, and the fact that any restoration they offer
-is hallucinated.
+Table~\ref{tab:lit} summarizes the surveyed literature; this subsection adds
+the narrative connective tissue. Passive methods
+\cite{zhou2018learning,wu2019mantranet} analyse the received image alone and
+need no acquisition-device cooperation, which no active scheme can match, at
+the cost of annotated corpora, GPU inference, and hallucinated restoration.
+Active watermarking inverts robustness \cite{cox1997secure} into fragility
+\cite{wong2001secret}, since failure is the authentication signal; pure
+fragility cannot distinguish a malicious splice from a benign re-save, which
+the semi-fragile pattern \cite{linchang2000} addresses. The present work is
+deliberately fully fragile, treating the semi-fragile extension as future
+scope.
 
-\subsection{Active watermarking: robust, fragile, semi-fragile}
-
-Early watermarking optimised \emph{robustness}: Cox \emph{et al.}
-\cite{cox1997secure} embed the mark in perceptually significant transform
-coefficients so that ownership survives compression and filtering. Authentication
-inverts the requirement --- the mark must be fragile, because its failure is the
-signal. Wong and Memon \cite{wong2001secret} developed block-wise fragile schemes
-with per-block signatures in the least-significant bits, giving localized, blind
-verification. The weakness of pure fragility is that it cannot distinguish a
-malicious splice from a benign re-save; Lin and Chang \cite{linchang2000} answered
-this with an invariant relation between DCT coefficient pairs that quantization
-preserves and manipulation breaks, establishing the semi-fragile pattern. The
-present work is deliberately fully fragile, and treats the semi-fragile extension
-as future scope.
-
-\subsection{Self-embedding and content recovery}
-
-The step from detection to recovery is due to Fridrich and Goljan
-\cite{fridrich1999selfembedding}: embed a compressed version of each block inside
-the image itself. Their triad --- block-wise compression, key-dependent mapping to
-a distant carrier, LSB embedding --- is the direct ancestor of this design. Lin
-\emph{et al.} \cite{lin2005hierarchical} added a hierarchical multi-level block
-structure verifying at several granularities, improving localization resolution
-and the robustness of the tamper decision.
-
-Security analysis runs alongside. Holliman and Memon
-\cite{holliman2000counterfeiting} showed that if a block's watermark depends only
-on that block's own content, an adversary can collage authentic blocks into a
-counterfeit in which every block verifies. Fridrich \cite{fridrich2002security}
-analysed localizing fragile marks in the same spirit. The practical consequence,
-adopted here without modification, is that the authentication tag must bind block
-content, block index and an image-level identifier under a secret key.
-
-\subsection{The tamper coincidence problem}
+Self-embedding \cite{fridrich1999selfembedding} is the direct ancestor of this
+design: block-wise compression, key-dependent mapping to a distant carrier,
+LSB embedding. Hierarchical verification \cite{lin2005hierarchical} improves
+localization resolution. Security analysis \cite{holliman2000counterfeiting,
+fridrich2002security} shows that a block watermark depending only on its own
+content lets an adversary collage a counterfeit that verifies everywhere; the
+consequence adopted here is that the tag must bind block content, block index
+and an image-level identifier under a secret key.
 
 A one-to-one backup allocation has a characteristic failure: a block and the
-block holding its recovery data may be destroyed by the same attack. Aminuddin
-and Ernawan named this the \emph{tamper coincidence problem} and, in AuSR3
-\cite{ausr3}, addressed it by mapping each block's recovery data to the most
-distant available location; the earlier AuSR1 \cite{ausr1} established the
-family's $2\times2$ recovery granularity. \textbf{The distant-mapping principle is
-theirs, not ours}, and this synopsis does not claim it. What this project
-contributes is the specific construction: a key-seeded permutation built directly
-in cycle notation, so that bijectivity and the absence of short cycles hold
-unconditionally rather than being checked after the fact, combined with an
-enforced minimum-separation repair pass.
+block holding its recovery data may be destroyed together. Aminuddin and
+Ernawan named this the \emph{tamper coincidence problem} and, in AuSR3
+\cite{ausr3}, addressed it by mapping to the most distant available location;
+AuSR1 \cite{ausr1} established the family's $2\times2$ recovery granularity.
+\textbf{The distant-mapping principle is theirs, not ours.} This project
+contributes the specific construction: a key-seeded permutation built directly
+in cycle notation, so bijectivity and the absence of short cycles hold
+unconditionally, with an enforced minimum-separation repair pass.
 
-\subsection{Reference sharing and fountain-coded allocation}
-
-Zhang \emph{et al.} \cite{zhang2011reference} reframed payload allocation so that
-reference information is \emph{shared} across blocks and reconstruction becomes
-the solution of a linear system, lifting the tolerable tamper ratio above the
-naive one-to-one limit. Korus and Dziech \cite{korus2013efficient} added
-content-adaptive self-embedding with a formal rate--distortion analysis. This
-matters directly to the present design and is stated plainly in Section~11: a
+Zhang \emph{et al.} \cite{zhang2011reference} share reference information
+across blocks so reconstruction solves a linear system, lifting the tolerable
+tamper ratio above the one-to-one limit; Korus and Dziech
+\cite{korus2013efficient} add content-adaptive self-embedding with a formal
+rate--distortion analysis. This matters directly here (Section~11): a
 one-to-one mapping fails all-or-nothing per block, whereas shared allocations
-degrade gracefully, which is why Korus and Dziech report far higher whole-image
-reconstruction at high damage levels than this scheme achieves.
+degrade gracefully, which is why Korus and Dziech report far higher
+whole-image reconstruction at high damage levels than this scheme achieves.
 
-\subsection{Learned proactive watermarking}
-
-A recent family embeds a learned watermark so that a trained network both
-localizes and recovers; EditGuard \cite{editguard} is representative, jointly
-optimising an invertible watermarking network for localization and copyright
-protection. ``Active watermarking detects but does not recover'' is therefore no
-longer an accurate description of the field, and this project does not claim
-better accuracy than these systems. The distinction offered is auditability: a
-decision here is one recomputed keyed hash, reproducible bit for bit by any third
-party holding the key, whereas a learned localizer's decision is a trained
-network's output and cannot be recomputed without its weights.
+A recent family embeds a learned watermark so a trained network both
+localizes and recovers; EditGuard \cite{editguard} jointly optimises an
+invertible watermarking network for localization and copyright protection.
+``Active watermarking detects but does not recover'' is therefore no longer
+accurate, and this project does not claim better accuracy than these systems
+-- the distinction offered is auditability: a decision here is one recomputed
+keyed hash, reproducible bit for bit by any third party holding the key,
+whereas a learned localizer's decision cannot be recomputed without its
+weights.
 
 \begin{table}[htbp]
 \centering
@@ -353,85 +302,70 @@ network's output and cannot be recomputed without its weights.
 \toprule
 \textbf{Ref.} & \textbf{Author(s), Year} & \textbf{Technique} & \textbf{Limitation / gap} \\
 \midrule
-\cite{cox1997secure} & Cox \emph{et al.}, 1997 & Spread-spectrum robust watermark in significant coefficients & Robustness is the inverse of authentication; cannot signal change \\
-\cite{fridrich1999selfembedding} & Fridrich \& Goljan, 1999 & Origin of self-embedding; compressed backup at a distant carrier & Recovery approximate; no keyed binding of block index \\
-\cite{holliman2000counterfeiting} & Holliman \& Memon, 2000 & Counterfeiting attack on block-wise independent marks & Attack, not scheme; forces index and image-ID binding \\
-\cite{linchang2000} & Lin \& Chang, 2000 & Semi-fragile authentication via DCT coefficient-pair invariants & Tolerant to compression, so weaker localization precision \\
+\cite{cox1997secure} & Cox \emph{et al.}, 1997 & Spread-spectrum robust watermark in significant coefficients & Robustness inverts authentication; cannot signal change \\
+\cite{fridrich1999selfembedding} & Fridrich \& Goljan, 1999 & Origin of self-embedding; compressed backup at distant carrier & Recovery approximate; no keyed block-index binding \\
+\cite{holliman2000counterfeiting} & Holliman \& Memon, 2000 & Counterfeiting attack on block-wise independent marks & Attack, not scheme; forces index/image-ID binding \\
+\cite{linchang2000} & Lin \& Chang, 2000 & Semi-fragile authentication via DCT coefficient-pair invariants & Tolerant to compression, weaker localization precision \\
 \cite{wong2001secret} & Wong \& Memon, 2001 & Block-wise fragile signatures in LSBs; blind, localized & Authenticates only; no content recovery \\
-\cite{fridrich2002security} & Fridrich, 2002 & Security analysis of localizing fragile marks & Analysis; no recovery mechanism \\
+\cite{fridrich2002security} & Fridrich, 2002 & Security analysis of localizing fragile marks & Analysis only; no recovery mechanism \\
 \cite{lin2005hierarchical} & Lin \emph{et al.}, 2005 & Hierarchical multi-level verification & Higher payload cost per block \\
 \cite{zhang2011reference} & Zhang \emph{et al.}, 2011 & Reference sharing; reconstruction as a linear system & Higher decode complexity; needs global solve \\
 \cite{korus2013efficient} & Korus \& Dziech, 2013 & Content-adaptive self-embedding, rate--distortion analysis & Substantially more complex allocation \\
-\cite{ausr1} & Aminuddin \& Ernawan, 2022 & AuSR1: $2\times2$ recovery, LSB shifting & LSB shifting perturbs bits an MSB-authenticating tag must cover \\
-\cite{ausr3} & Aminuddin \& Ernawan, 2023 & AuSR3: distant block mapping against tamper coincidence & Comparable per-class recovery figures not citable without re-implementation \\
-\cite{editguard} & Zhang \emph{et al.}, 2024 & Learned proactive watermark; localizes and recovers & Requires training and model weights; decision not independently recomputable \\
+\cite{ausr1} & Aminuddin \& Ernawan, 2022 & AuSR1: $2\times2$ recovery, LSB shifting & Shifting perturbs bits an MSB tag must cover \\
+\cite{ausr3} & Aminuddin \& Ernawan, 2023 & AuSR3: distant block mapping against tamper coincidence & Comparable figures not citable without re-implementation \\
+\cite{editguard} & Zhang \emph{et al.}, 2024 & Learned proactive watermark; localizes and recovers & Requires training/weights; not independently recomputable \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{Current market survey}
+\subsection{Current market survey and research gap}
 
-Deployed products in this space fall into three groups, none of which offers
-localization and recovery together from within the image itself.
-
-\textbf{Provenance metadata.} The C2PA Content Credentials standard, adopted by
-several camera and editing-software vendors, attaches a cryptographically signed
-manifest recording an asset's origin and edit history. Its strength is
-standardization and industry backing. Its weakness for this problem is
-structural: the manifest lives \emph{beside} the pixels, so re-encoding, a
+Deployed products fall into three groups, none offering localization and
+recovery together from within the image itself. \textbf{Provenance metadata.}
+The C2PA Content Credentials standard attaches a cryptographically signed
+manifest recording an asset's origin and edit history; its weakness is
+structural --- the manifest lives \emph{beside} the pixels, so re-encoding, a
 screenshot, or a metadata strip removes it entirely, and it can never restore
-content --- it attests to history rather than protecting it.
+content. \textbf{Controlled-capture services} such as Truepic authenticate
+images at capture through a proprietary pipeline, but require the vendor's
+infrastructure and do not recover destroyed content. \textbf{Forensic analysis
+tools} such as Amped Authenticate and FotoForensics apply passive heuristics
+--- error-level analysis, noise and CFA inconsistency, metadata review --- to
+arbitrary images, but results require expert interpretation, carry no ground
+truth, and offer no restoration. \textbf{Whole-file digital signatures}, as
+standardized for DICOM medical imaging, detect that a file changed but neither
+localize nor recover it.
 
-\textbf{Controlled-capture services.} Commercial offerings such as Truepic
-authenticate images at the moment of capture through a proprietary pipeline. They
-give strong provenance where they are used, but require the vendor's software and
-infrastructure, and again do not recover destroyed content.
+The gap in the market mirrors the gap in the literature: existing products
+either attest to provenance externally or analyse pixels after the fact, and
+none embeds recoverable content inside the image itself.
 
-\textbf{Forensic analysis tools.} Analyst-facing products such as Amped
-Authenticate, and free services in the FotoForensics mould, apply passive
-heuristics --- error-level analysis, noise and CFA inconsistency, metadata
-review --- to images with no prior cooperation. Their advantage is that they work
-on arbitrary images. Their limitations are that results require expert
-interpretation, carry no ground truth, and again offer no restoration.
-
-\textbf{Whole-file digital signatures}, as standardized for DICOM medical imaging,
-detect that a file changed but neither localize the change to a region nor
-recover it.
-
-The gap in the market mirrors the gap in the literature: existing products either
-attest to provenance externally or analyse pixels after the fact, and none embeds
-recoverable content inside the image so that a damaged region can be restored
-from what survived.
-
-\subsection{Research gap}
-
-The gap addressed here is deliberately narrow, and stating it narrowly is part of
-the contribution. It is \emph{not} the distant-mapping idea, which is credited to
-AuSR3 \cite{ausr3}. It is \emph{not} superiority over learned proactive
-watermarking \cite{editguard}, which already localizes and recovers and against
-which no accuracy claim is made. The gap is threefold. First, \textbf{determinism
-and auditability}: a construction in which every positive detection reduces to one
-recomputed keyed hash comparison that a third party holding the key can repeat
-bit for bit, with no training data, no GPU and no run-to-run variance. Second,
-\textbf{an explicit keyed construction} with each field binding stated and
-analysed, including what each binding defeats. Third, \textbf{joint evaluation}:
-imperceptibility, localization and recovery reported together, with the
-recoverability rate and the unrecoverable fraction disclosed rather than
-excluded, across four tamper classes and seven tamper ratios against exact
-ground-truth masks.
+The gap addressed here is deliberately narrow. It is \emph{not} the
+distant-mapping idea, credited to AuSR3 \cite{ausr3}. It is \emph{not}
+superiority over learned proactive watermarking \cite{editguard}, which already
+localizes and recovers and against which no accuracy claim is made. The gap is
+threefold: \textbf{determinism and auditability} --- every positive detection
+reduces to one recomputed keyed hash comparison a third party holding the key
+can repeat bit for bit, with no training data, no GPU and no run-to-run
+variance; \textbf{an explicit keyed construction} with each field binding
+stated and analysed, including what it defeats; and \textbf{joint evaluation}
+--- imperceptibility, localization and recovery reported together, with the
+recoverability rate and unrecoverable fraction disclosed rather than excluded,
+across four tamper classes and seven tamper ratios against exact ground-truth
+masks.
 
 \section{Problem Definition}
 
-Given a digital image stored in a lossless container and a secret key held by the
-authenticating party, embed authentication and recovery information into the
-image itself such that: any subsequent region-level modification is localized to
-the block grid without reference to the original image or any external database;
-the original content of the modified region is approximately restored from
-information that survived within the same image; and any region that cannot be
-restored is identified as such rather than reconstructed by inference. The
-embedding must be perceptually transparent, the verification decision must be
-deterministic and independently recomputable, and the entire pipeline must run on
-a commodity CPU without trained parameters.
+Given a digital image stored in a lossless container and a secret key held by
+the authenticating party, embed authentication and recovery information into
+the image itself such that: any subsequent region-level modification is
+localized to the block grid without reference to the original image or any
+external database; the original content of the modified region is
+approximately restored from information that survived within the same image;
+and any region that cannot be restored is identified as such rather than
+reconstructed by inference. Embedding must be perceptually transparent,
+verification must be deterministic and independently recomputable, and the
+pipeline must run on a commodity CPU without trained parameters.
 
 \section{Objectives}
 
@@ -475,9 +409,9 @@ on their own accuracy terms.
 \subsection{Overview}
 
 The system has four decoupled stages: embedding at or near acquisition;
-tampering, which is simulated by the evaluation harness; verification and
-localization at any later point; and recovery. Verification requires only the
-received image, the key and the image identifier --- no original, no reference
+tampering, simulated by the evaluation harness; verification and localization
+at any later point; and recovery. Verification requires only the received
+image, the key and the image identifier --- no original, no reference
 database, no network call and no model weights.
 
 \begin{figure}[htbp]
@@ -531,48 +465,45 @@ tampered before it reaches verification.}
 
 \subsection{Embedding}
 
-The image is partitioned into non-overlapping $B \times B$ blocks in raster order,
-with $B = 8$ by default, giving $K = (M/B)(N/B)$ blocks. Dimensions that are not a
-multiple of $B$ are cropped rather than padded, so that no synthetic content is
-ever authenticated. The two least-significant bit-planes of each block provide
-$2B^2 = 128$ bits of capacity, allocated as a 32-bit authentication tag and a
-96-bit recovery descriptor.
+The image is partitioned into non-overlapping $B \times B$ blocks in raster
+order, $B = 8$ by default, giving $K = (M/B)(N/B)$ blocks; dimensions not a
+multiple of $B$ are cropped rather than padded, so no synthetic content is
+ever authenticated. The two least-significant bit-planes of each block
+provide $2B^2 = 128$ bits of capacity, allocated as a 32-bit authentication
+tag and a 96-bit recovery descriptor, both computed from the block's six
+most-significant bit-planes (projection $\mathrm{msb}(a) = a \wedge
+\mathtt{0xFC}$). This is what makes the scheme single-pass: embedding writes
+only to the two LSBs, so it cannot alter what was signed, and no iterative
+embed-and-verify loop is required.
 
-All hashed and compressed content is computed from the block's six
-most-significant bit-planes, obtained by the projection $\mathrm{msb}(a) = a
-\wedge \mathtt{0xFC}$. This is the property that makes the scheme single-pass:
-because embedding writes only to the two LSBs, it cannot alter what was signed,
-so no iterative embed-and-verify loop is required.
-
-The recovery descriptor compresses a block to 96 bits. The primary variant applies
-a level-shifted orthonormal two-dimensional DCT and retains the first twelve
-zig-zag coefficients, each quantized to a signed 8-bit value using per-band step
-sizes taken from the JPEG quality-50 luminance table, giving $12 \times 8 = 96$
-bits exactly. A second, low-complexity variant stores a $4 \times 4$ array of
-$2 \times 2$ block means at 6 bits each, requiring no transform.
-
-Descriptors are then permuted: block $i$'s descriptor is stored in a distant
-partner block, and the tag written into block $i$ binds the descriptor that block
-$i$ physically carries. The order matters --- the descriptor is placed first, and
-the tag that authenticates it is computed second.
+The recovery descriptor compresses a block to 96 bits. The primary variant
+applies a level-shifted orthonormal two-dimensional DCT and retains the first
+twelve zig-zag coefficients, each quantized to a signed 8-bit value using
+per-band step sizes from the JPEG quality-50 luminance table, giving
+$12 \times 8 = 96$ bits exactly. A second, low-complexity variant stores a
+$4 \times 4$ array of $2 \times 2$ block means at 6 bits each, requiring no
+transform. Descriptors are then permuted: block $i$'s descriptor is stored in
+a distant partner block, and the tag written into block $i$ binds the
+descriptor that block $i$ physically carries, descriptor first and tag
+second.
 
 \subsection{Verification, localization and recovery}
 
-Verification extracts the 128 stored bits from each block, splits them into the
-stored tag and the stored descriptor, recomputes the tag over the block's current
+Verification extracts the 128 stored bits from each block, splits them into
+the stored tag and descriptor, recomputes the tag over the block's current
 most-significant content \emph{and the descriptor bits actually present}, and
-flags a mismatch. Per-channel decisions are combined by logical OR, so a tamper
-touching any single channel flags the block. A neighbourhood refinement pass then
-fills isolated negatives, using a threshold scaled by the number of valid
-neighbours so that blocks at the image border are not penalised.
+flags a mismatch. Per-channel decisions combine by logical OR, so a tamper
+touching any single channel flags the block; a neighbourhood refinement pass
+then fills isolated negatives, using a threshold scaled by the number of
+valid neighbours so border blocks are not penalised.
 
-Recovery evaluates three sets on a frozen copy of the mask, before any pixel is
-written: the flagged set $\mathcal{T}$, the subset $\mathcal{R}$ whose partner is
-intact and which can therefore be rebuilt, and the subset $\mathcal{U}$ whose
-partner is also flagged. Blocks in $\mathcal{R}$ are decoded from the surviving
-descriptor. Blocks in $\mathcal{U}$ are marked with a flat value --- never
-inpainted, never silently left in place --- so that a viewer can always tell
-reconstructed content from content that could not be recovered.
+Recovery evaluates three sets before any pixel is written: the flagged set
+$\mathcal{T}$, the subset $\mathcal{R}$ whose partner is intact and can
+therefore be rebuilt, and the subset $\mathcal{U}$ whose partner is also
+flagged. Blocks in $\mathcal{R}$ are decoded from the surviving descriptor;
+blocks in $\mathcal{U}$ are marked with a flat value --- never inpainted,
+never silently left in place --- so a viewer can always tell reconstructed
+content from content that could not be recovered.
 
 \section{Relevant Mathematics}
 
@@ -601,10 +532,10 @@ satisfying
 \text{(R2) } \lVert c(i) - c(m(i)) \rVert_2 \ge d_{\min}, \quad
 \text{(R3) } m \text{ is a single } K\text{-cycle},
 \end{equation}
-with $d_{\min} = \tfrac{1}{4}\min(M,N)$. R3 is obtained by construction rather
-than by rejection sampling: a cryptographically seeded Fisher--Yates shuffle
-produces a cycle order, and $m$ is read off it directly, which makes fixed points
-and mutual pairs impossible.
+with $d_{\min} = \tfrac{1}{4}\min(M,N)$. R3 is obtained by construction, not
+rejection sampling: a cryptographically seeded Fisher--Yates shuffle produces
+a cycle order, and $m$ is read off it directly, making fixed points and
+mutual pairs impossible.
 
 \textbf{Descriptor.} With $C_i$ the DCT of the level-shifted projected block and
 $\sigma(\ell)$ the zig-zag index,
@@ -652,15 +583,15 @@ pipeline.
 \toprule
 \textbf{Module} & \textbf{Responsibility} \\
 \midrule
-Payload foundation & Key derivation and domain-separated subkeys, bit budget, block geometry, MSB projection, keyed tag computation, descriptor encoding and decoding, LSB packing. Imported by every other module. \\
-Block mapper & Builds the key-seeded single-cycle permutation, enforces the minimum-separation constraint, and verifies R1--R3 before returning. \\
-Embedder & Stage 1. Computes descriptors, permutes them, computes the binding tags, writes both into the two LSB planes; asserts that the MSB planes are unchanged. \\
-Detector and localizer & Stage 3. Extracts stored payload, recomputes tags, produces the block-level tamper mask, applies neighbourhood refinement, expands to a pixel mask, and exposes a per-block audit record. \\
-Recovery engine & Stage 4. Partitions the flagged set into recoverable and unrecoverable, rebuilds the former from partner descriptors, marks the latter, and reports $\rho$. \\
-Tamper harness & Generates the four tamper classes with exact ground-truth masks and the achieved tamper ratio. \\
-Metrics and evaluation & PSNR, SSIM, confusion counts, localization scores, in-region recovery metrics, and the CSV result grid. \\
-Automated gate & Validates the result grid against expected bands and refuses to emit tables or figures if any check fails. \\
-Applications & A local web application and a demonstration interface over the same pipeline, with no duplicated numerics. \\
+Payload foundation & Key derivation, bit budget, block geometry, MSB projection, tag computation, descriptor encode/decode, LSB packing. Imported by every other module. \\
+Block mapper & Builds the key-seeded single-cycle permutation, enforces minimum separation, verifies R1--R3. \\
+Embedder & Stage 1. Computes descriptors, permutes them, computes binding tags, writes both into the two LSB planes. \\
+Detector and localizer & Stage 3. Extracts payload, recomputes tags, produces the block-level tamper mask, refines it, expands to a pixel mask, exposes a per-block audit record. \\
+Recovery engine & Stage 4. Splits the flagged set into recoverable/unrecoverable, rebuilds from partner descriptors, marks the rest, reports $\rho$. \\
+Tamper harness & Generates the four tamper classes with exact ground-truth masks and achieved ratio. \\
+Metrics and evaluation & PSNR, SSIM, confusion counts, localization scores, in-region recovery metrics, CSV result grid. \\
+Automated gate & Validates the result grid against expected bands; refuses to emit tables/figures on any failure. \\
+Applications & A local web application and a demonstration interface over the same pipeline. \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -676,16 +607,16 @@ Applications & A local web application and a demonstration interface over the sa
 \toprule
 \textbf{Category} & \textbf{Requirement} \\
 \midrule
-Language & Python 3.10 or newer. Cryptographic primitives from the standard library (\texttt{hashlib}, \texttt{hmac}, \texttt{struct}); no third-party cryptography. \\
-Core libraries & NumPy 2.1.2, OpenCV (headless) 5.0.0.93, scikit-image 0.26.0, Pillow 10.4.0 --- all pinned exactly for reproducibility. \\
-Interface libraries & Flask for the local web application; Streamlit 1.61.1 for the demonstration interface; Matplotlib 3.11.1 for figures. \\
+Language & Python 3.10+. Cryptographic primitives from the standard library (\texttt{hashlib}, \texttt{hmac}, \texttt{struct}); no third-party cryptography. \\
+Core libraries & NumPy 2.1.2, OpenCV (headless) 5.0.0.93, scikit-image 0.26.0, Pillow 10.4.0 --- pinned exactly. \\
+Interface libraries & Flask (web app); Streamlit 1.61.1 (demo interface); Matplotlib 3.11.1 (figures). \\
 Storage & SQLite for the local protected-image library. \\
-Document build & \texttt{tectonic} and \texttt{pandoc} (optional; required only to rebuild the paper and this synopsis). \\
-Machine learning & \textbf{None.} No framework, no trained parameters, no model artefact to version. \\
-Processor & Any commodity x86-64 or ARM CPU. Execution is single-threaded. \\
-Accelerator & \textbf{No GPU required at any stage} --- for embedding, verification or recovery. \\
-Performance & A $512 \times 512$ image is processed end-to-end in tens of milliseconds on a commodity CPU. \\
-Operating system & Platform independent (developed and tested on Windows; no OS-specific dependency). \\
+Document build & \texttt{tectonic} and \texttt{pandoc} (optional; only to rebuild the paper/synopsis). \\
+Machine learning & \textbf{None.} No framework, no trained parameters. \\
+Processor & Any commodity x86-64 or ARM CPU, single-threaded. \\
+Accelerator & \textbf{No GPU required} at any stage. \\
+Performance & A $512 \times 512$ image processes end-to-end in tens of milliseconds on a commodity CPU. \\
+Operating system & Platform independent (developed/tested on Windows). \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -739,16 +670,16 @@ In-region PSNR$_\Omega$ (dB) & 30.2 & 29.7 & 29.8 & 29.7 & 29.7 & 29.8 & 29.8 \\
 Four results deserve comment.
 
 \textbf{Localization.} Block-level recall is 1.0000 for splice, crop-and-refill
-and noise, and 0.999981 for object-removal-by-inpainting (22 MSB-preserved-miss
-blocks) --- the predicted residual of the descriptor-binding fix, appearing in
-measurement for the first time on this denser grid, and reported in the
-abstract rather than a footnote. Block-level \emph{precision} is deliberately
-not headlined: under the ground-truth rule used here --- a block is tampered if
-the tamper region covers any of its pixels --- a block-level false positive is
-structurally impossible, so that metric reads 1.000 regardless of detector
-quality. The informative figure is pixel-level precision, 0.9614, whose
-shortfall from 1.0 is the $8\times8$ block-quantization penalty and cannot
-improve without a finer grid.
+and noise, and 0.999981 for object-removal-by-inpainting (22
+MSB-preserved-miss blocks) --- the predicted residual of the
+descriptor-binding fix, appearing in measurement for the first time on this
+denser grid. Block-level \emph{precision} is deliberately not headlined: under
+the ground-truth rule used here --- a block is tampered if the tamper region
+covers any of its pixels --- a block-level false positive is structurally
+impossible, so that metric reads 1.000 regardless of detector quality. The
+informative figure is pixel-level precision, 0.9614, whose shortfall from 1.0
+is the $8\times8$ block-quantization penalty and cannot improve without a
+finer grid.
 
 \textbf{The recoverability curve does not collapse.} An earlier three-ratio
 grid ($\alpha\in\{10\%,25\%,50\%\}$) could not distinguish a smooth decline
@@ -757,31 +688,28 @@ this: $\rho$ is monotone and near-linear across the full 10--70\% range and
 sits 3--6 points \emph{above} its own structural bound $1-\alpha$ at every
 ratio measured (Table~\ref{tab:loc}). The two highest ratios are nominal only
 --- the region generator cannot reliably place one compact region over
-60--70\% of a frame (achieved: 57.3\% and 65.3\%) --- so we do not present
-0.70 as though 70\% of the frame were actually tampered.
+60--70\% of a frame (achieved: 57.3\% and 65.3\%).
 
 \textbf{The null condition.} Zero false-positive blocks were observed across
-1{,}802{,}240 independent block verifications, giving a rule-of-three 95\% upper
-bound of $1.66\times10^{-6}$ on the per-block false-positive rate. This is
+1{,}802{,}240 independent block verifications, giving a rule-of-three 95\%
+upper bound of $1.66\times10^{-6}$ on the per-block false-positive rate ---
 reported as a determinism and implementation-consistency check across images,
-variants and keys --- not as a statistical bound on the $2^{-32}$ cryptographic
-false-accept probability, which this experiment does not measure at all.
+variants and keys, not as a bound on the $2^{-32}$ cryptographic false-accept
+probability, which this experiment does not measure.
 
 \textbf{Coverage dominates recovery quality.} In-region recovery PSNR stays
 flat at 29.3--29.8~dB (mean 29.00~dB) across the entire ratio range while
-whole-image PSNR falls with shrinking coverage. This is direct measured
-evidence that mapping coverage, not descriptor fidelity, is the dominant
-lever --- and it identifies reference sharing as the highest-value upgrade. We
-state plainly that a one-to-one mapping still falls well short of
-reference-sharing and fountain-coded schemes at high tamper ratios
-\cite{zhang2011reference,korus2013efficient}.
+whole-image PSNR falls with shrinking coverage --- direct evidence that
+mapping coverage, not descriptor fidelity, is the dominant lever, identifying
+reference sharing as the highest-value upgrade. A one-to-one mapping still
+falls well short of reference-sharing and fountain-coded schemes at high
+tamper ratios \cite{zhang2011reference,korus2013efficient}.
 
 A block-size ablation quantifies the resolution/payload trade-off directly:
-reducing $B$ from 8 to 4 raises pixel-level precision from 0.9527 to 0.9794, at
-a cost of 2.85~dB of in-region recovery fidelity (29.63 to 26.78~dB), because
-the per-block payload falls from 128 to 32 bits and the authentication tag
-halves from 32 to 16 bits per channel --- independent of block size in
-principle, coupled here only by this implementation's fixed budget split.
+reducing $B$ from 8 to 4 raises pixel-level precision from 0.9527 to 0.9794,
+at a cost of 2.85~dB of in-region recovery fidelity (29.63 to 26.78~dB),
+because the per-block payload falls from 128 to 32 bits and the
+authentication tag halves from 32 to 16 bits per channel.
 
 \section{Project Plan and Schedule}
 
@@ -798,12 +726,12 @@ principle, coupled here only by this implementation's fixed budget split.
 \midrule
 1 & Literature survey and problem formulation & Survey, gap statement & Complete \\
 2 & Scheme design: bit budget, tag construction, block map & Design specification & Complete \\
-3 & Implementation of the core pipeline & Embed / detect / recover modules & Complete \\
+3 & Implementation of the core pipeline & Embed/detect/recover modules & Complete \\
 4 & Tamper harness and metrics & Four tamper classes, exact masks & Complete \\
-5 & Full experimental grid and validation & 3{,}232-row result grid, 25/27 gate (2 expected warnings) & Complete \\
-6 & Applications and adversarial testing & Web application; two defects found and fixed & Complete \\
+5 & Full experimental grid and validation & 3{,}232-row grid, 25/27 gate & Complete \\
+6 & Applications and adversarial testing & Web app; two defects found/fixed & Complete \\
 7 & Paper preparation and internal review & IEEE-format paper (Annexure A) & In progress \\
-8 & Variant~C consolidation into the reported grid & Updated tables and figures & Complete \\
+8 & Variant~C consolidation into reported grid & Updated tables/figures & Complete \\
 9 & Reference-sharing extension (Future Scope~1) & Prototype and comparison & Planned \\
 10 & Final report, demonstration and submission & Report, presentation, viva & Planned \\
 \bottomrule
@@ -815,48 +743,39 @@ academic calendar}.
 
 \section{Target Publication Venues}
 
-The work is intended for submission to a peer-reviewed venue in image forensics or
-multimedia security. Two candidate venues, both appropriate in scope:
+The work is intended for submission to a peer-reviewed venue in image
+forensics or multimedia security. Two candidate venues: the \textbf{IEEE
+International Workshop on Information Forensics and Security (WIFS)}, the
+natural venue for the tamper-localization literature surveyed above, and the
+\textbf{IEEE International Conference on Image Processing (ICIP)}, which has a
+long-established watermarking and forensics track and is where the founding
+Fridrich and Goljan self-correcting-images paper appeared. Should a national
+or journal venue be preferred, the \emph{National Conference on
+Communications} (NCC) and the \emph{EURASIP Journal on Information Security}
+are further options; deadlines are to be confirmed against the current call
+for papers.
 
-\begin{enumerate}[leftmargin=*]
-\item \textbf{IEEE International Workshop on Information Forensics and Security
-(WIFS)} --- the natural venue for authentication and forensic watermarking, and
-the community that publishes the tamper-localization literature surveyed above.
-\item \textbf{IEEE International Conference on Image Processing} (ICIP), which has
-a broad image-processing scope and a long-established watermarking and forensics
-track; the Fridrich and Goljan self-correcting-images paper that founds this line
-of work appeared there.
-\end{enumerate}
-
-Two further options, should a national or journal venue be preferred: the
-\emph{National Conference on Communications} (NCC), and the \emph{EURASIP Journal
-on Information Security}. Submission deadlines vary by edition and are to be
-confirmed against the current call for papers before selection.
-
-A complete IEEE-format manuscript has already been prepared and is attached as
-Annexure~A, so submission is a matter of venue selection and formatting rather
-than of new writing.
+A complete IEEE-format manuscript has already been prepared and is attached
+as Annexure~A, so submission is a matter of venue selection and formatting
+rather than new writing.
 
 \section{Conclusion}
 
 This project delivers a deterministic, training-free self-embedding fragile
-watermarking scheme that localizes tampering at block granularity and restores a
-low-frequency approximation of the destroyed content from information carried
-within the image itself. Measured over a 3{,}232-row experimental grid, it embeds
-at 45.479/45.492~dB PSNR (Variants A/C) and SSIM minimum 0.98031, achieves
-block-level recall of 1.0000 for three of four tamper classes and 0.999981 for
-object-removal-by-inpainting, headline pixel-level precision of 0.9614, and
-returns zero false positives across 1{,}802{,}240 block verifications. Its
-recoverability rate tracks its structural bound $1-\alpha$ closely across all
-seven measured tamper ratios rather than collapsing toward it, though
-one-to-one backup allocation remains an all-or-nothing structural limit
-relative to reference-sharing schemes at high tamper ratios; this synopsis
-states that limitation rather than concealing it, and adopting a
-reference-sharing allocation is the identified next step. The property that
-distinguishes the design is not accuracy but accountability: every verification
-decision is a single recomputed keyed hash comparison, reproducible bit for bit by
-any third party holding the key, which is precisely what an evidentiary
-application requires and what a learned detector cannot offer.
+watermarking scheme that localizes tampering at block granularity and
+restores a low-frequency approximation of the destroyed content from
+information carried within the image itself, with the headline imperceptibility,
+recall, precision and null-condition figures given in the Abstract and
+Section~11. Its recoverability rate tracks its structural bound $1-\alpha$
+closely across all seven measured tamper ratios rather than collapsing toward
+it, though one-to-one backup allocation remains an all-or-nothing structural
+limit relative to reference-sharing schemes at high tamper ratios --- stated
+here rather than concealed, with reference sharing the identified next step.
+The property that distinguishes the design is not accuracy but
+accountability: every verification decision is a single recomputed keyed hash
+comparison, reproducible bit for bit by any third party holding the key,
+which is precisely what an evidentiary application requires and what a
+learned detector cannot offer.
 
 \begin{thebibliography}{99}
 \small
@@ -902,6 +821,6 @@ application requires and what a learned detector cannot offer.
 \vspace{0.3in}
 \noindent\textbf{Annexure A.} Full IEEE-format manuscript, prepared in the
 IEEEtran conference format and compiled to
-\mbox{\texttt{IEEE\_Paper.pdf}} (15 pages), attached separately.
+\mbox{\texttt{IEEE\_Paper.pdf}} (11 pages), attached separately.
 
 \end{document}

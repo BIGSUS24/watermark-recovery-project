@@ -110,8 +110,8 @@ ck(not outside, "no ../output path outside the \\figorbox fallback", outside)
 ck(tex.count("../output") == 2, "only the fallback branch's two ../output uses remain",
    tex.count("../output"))
 # The definition reads \newcommand{\figorbox}[2], so \figorbox{ counts uses only.
-ck(tex.count(r"\newcommand{\figorbox}") == 1 and tex.count(r"\figorbox{") == 3,
-   "figorbox defined once and used three times", tex.count(r"\figorbox{"))
+ck(tex.count(r"\newcommand{\figorbox}") == 1 and tex.count(r"\figorbox{") == 2,
+   "figorbox defined once and used twice", tex.count(r"\figorbox{"))
 ck(tex.count(r"\documentclass[conference]{IEEEtran}") == 1, "still IEEEtran conference class")
 
 for env in ("document", "tabular", "table", "figure", "thebibliography", "abstract",
@@ -126,7 +126,7 @@ for env in ("document", "tabular", "table", "figure", "thebibliography", "abstra
 ck(tex.count(r"\begin{tabular}") == 7, "seven tabular environments present",
    tex.count(r"\begin{tabular}"))
 ck(tex.count(r"\begin{table}") == 7, "seven table floats present", tex.count(r"\begin{table}"))
-ck(tex.count(r"\begin{figure}") == 3, "three figure floats present", tex.count(r"\begin{figure}"))
+ck(tex.count(r"\begin{figure}") == 2, "two figure floats present", tex.count(r"\begin{figure}"))
 
 labels = set(re.findall(r"\\label\{([^}]+)\}", tex))
 refs = (set(re.findall(r"\\ref\{([^}]+)\}", tex))
