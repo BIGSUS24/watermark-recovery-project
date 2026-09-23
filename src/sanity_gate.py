@@ -186,8 +186,19 @@ def check_rho_monotone(tamper_rows: list[dict]) -> dict:
 # no entry here must not silently PASS (no band = no judgement) or silently SKIP
 # indistinguishably from "no data at all" -- see check_psnr_whole_unmarked_bands,
 # which reports the measured mean anyway and says plainly that the band is pending.
+# Phase C measured all seven. Each band is the measured corpus mean with about 5 dB
+# of headroom below and 6 above -- wide enough that ordinary corpus variation never
+# trips it, tight enough that a real regression does. "0.25" is gone because #40
+# replaced it; leaving a band for a ratio the grid no longer runs would be dead
+# weight that quietly never fires.
 PSNR_WHOLE_UNMARKED_BANDS: dict[str, tuple[float, float]] = {
-    "0.10": (28, 40), "0.25": (22, 36), "0.50": (13, 32),
+    "0.10": (28, 40),   # measured 33.97
+    "0.20": (21, 33),   # measured 26.45
+    "0.30": (17, 29),   # measured 22.33
+    "0.40": (14, 26),   # measured 19.34
+    "0.50": (13, 32),   # measured 17.36 -- floor kept from the original calibration
+    "0.60": (11, 22),   # measured 15.84
+    "0.70": (9, 21),    # measured 14.62
 }
 
 

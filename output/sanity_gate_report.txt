@@ -1,27 +1,31 @@
 SANITY GATE REPORT -- E:\cheat\Selection\watermark-recovery-project\output\runs.csv
 ========================================================================================
-[FAIL] row counts vs expected grid (main 1792 + null 320 + ablation 1120 = 3232)  total=1184/3232; main=384/1792; null=320/320; ablation=480/1120; main: 1536 grid cells missing (e.g. [('airplane', 'crop_refill', '0.10', 'C'), ('airplane', 'crop_refill', '0.20', 'A'), ('airplane', 'crop_refill', '0.20', 'C')]); null: 160 grid cells missing (e.g. [('airplane', 'C', 0), ('airplane', 'C', 1), ('airplane', 'C', 2)]); ablation: 800 grid cells missing (e.g. [('airplane', 'crop_refill', '0.20', 'A'), ('airplane', 'crop_refill', '0.20', 'B'), ('airplane', 'crop_refill', '0.30', 'A')])
-[PASS] no duplicate run_id                                                        1184 rows, 1184 unique run_ids
+[PASS] row counts vs expected grid (main 1792 + null 320 + ablation 1120 = 3232)  total=3232/3232; main=1792/1792; null=320/320; ablation=1120/1120
+[PASS] no duplicate run_id                                                        3232 rows, 3232 unique run_ids
 [PASS] recoverability_rate / psnr_in_region column pairing                        recoverability_rate present=True, psnr_in_region present=True
-[PASS] wm_psnr mean (variant A) [PROVISIONAL band]                                mean=43.1725 dB (band 42.0-47.0, n=384, skipped=0)
-[SKIP] wm_psnr mean (variant C) [PROVISIONAL band]                                no matching rows yet
-[PASS] wm_psnr max (variant A) [PROVISIONAL band]                                 max=43.3847 (<= 49.0, n=384)
-[SKIP] wm_psnr max (variant C) [PROVISIONAL band]                                 no matching rows yet
-[PASS] wm_ssim min (variant A) [PROVISIONAL band]                                 min=0.97183 (>= 0.96, n=384)
-[SKIP] wm_ssim min (variant C) [PROVISIONAL band]                                 no matching rows yet
+[PASS] wm_psnr mean (variant A) [PROVISIONAL band]                                mean=45.4790 dB (band 42.0-47.0, n=896, skipped=0)
+[PASS] wm_psnr mean (variant C) [PROVISIONAL band]                                mean=45.4921 dB (band 42.0-47.0, n=896, skipped=0)
+[PASS] wm_psnr max (variant A) [PROVISIONAL band]                                 max=45.7271 (<= 49.0, n=896)
+[PASS] wm_psnr max (variant C) [PROVISIONAL band]                                 max=45.7077 (<= 49.0, n=896)
+[PASS] wm_ssim min (variant A) [PROVISIONAL band]                                 min=0.98031 (>= 0.96, n=896)
+[PASS] wm_ssim min (variant C) [PROVISIONAL band]                                 min=0.97971 (>= 0.96, n=896)
 [PASS] null false-positive blocks (sum)                                           sum=0 across 320 null rows / 1802240 block checks (must be exactly 0)
-[PASS] block_precision mean (all tamper rows)                                     mean=1.0000 (>= 0.98, n=864, skipped=0)
-[PASS] block_recall mean (all tamper rows)                                        mean=1.0000 (>= 0.97, n=864, skipped=0)
-[PASS] psnr_whole_unmarked mean @ ratio 0.10                                      mean=33.6661 dB (band 28-40, n=288, skipped=0)
-[PASS] psnr_whole_unmarked mean @ ratio 0.25                                      mean=23.8144 dB (band 22-36, n=288, skipped=0)
-[PASS] psnr_whole_unmarked mean @ ratio 0.50                                      mean=17.3119 dB (band 13-32, n=288, skipped=0)
-[PASS] psnr_in_region mean (all tamper rows, all ratios)                          mean=28.1210 dB (band 22-36, n=864, skipped=0)
-[PASS] rho monotonicity: non-increasing across every adjacent tamper ratio        rho(0.10)=0.9606 rho(0.25)=0.8061 rho(0.50)=0.5343
-[PASS] recoverability_rate has no NaN/inf                                         0 of 1184 rows have NaN/inf recoverability_rate
-[PASS] psnr_whole_marked <= psnr_whole_unmarked (per row)                         29 of 1184 rows (2.4%) have marked>unmarked; classes=['noise', 'splice']
+[PASS] block_precision mean (all tamper rows)                                     mean=1.0000 (>= 0.98, n=2912, skipped=0)
+[PASS] block_recall mean (all tamper rows)                                        mean=1.0000 (>= 0.97, n=2912, skipped=0)
+[PASS] psnr_whole_unmarked mean @ ratio 0.10                                      mean=33.9683 dB (band 28-40, n=416, skipped=0)
+[PASS] psnr_whole_unmarked mean @ ratio 0.20                                      mean=26.4525 dB (band 21-33, n=416, skipped=0)
+[PASS] psnr_whole_unmarked mean @ ratio 0.30                                      mean=22.3318 dB (band 17-29, n=416, skipped=0)
+[PASS] psnr_whole_unmarked mean @ ratio 0.40                                      mean=19.3366 dB (band 14-26, n=416, skipped=0)
+[PASS] psnr_whole_unmarked mean @ ratio 0.50                                      mean=17.3587 dB (band 13-32, n=416, skipped=0)
+[PASS] psnr_whole_unmarked mean @ ratio 0.60                                      mean=15.8392 dB (band 11-22, n=416, skipped=0)
+[PASS] psnr_whole_unmarked mean @ ratio 0.70                                      mean=14.6163 dB (band 9-21, n=416, skipped=0)
+[PASS] psnr_in_region mean (all tamper rows, all ratios)                          mean=29.0010 dB (band 22-36, n=2912, skipped=0)
+[PASS] rho monotonicity: non-increasing across every adjacent tamper ratio        rho(0.10)=0.9601 rho(0.20)=0.8601 rho(0.30)=0.7496 rho(0.40)=0.6384 rho(0.50)=0.5340 rho(0.60)=0.4426 rho(0.70)=0.3572
+[PASS] recoverability_rate has no NaN/inf                                         0 of 3232 rows have NaN/inf recoverability_rate
+[PASS] psnr_whole_marked <= psnr_whole_unmarked (per row)                         104 of 3232 rows (3.2%) have marked>unmarked; classes=['noise', 'splice']
 [PASS] soft: psnr_in_region < 18 dB anywhere                                      0 rows with psnr_in_region < 18 dB
-[PASS] soft: n_coincidental_unchanged_px > 0.5% of n_tampered_px                  0 of 864 tamper rows exceed 0.5% coincidental-unchanged px
-[PASS] soft: n_msb_preserved_miss_blocks > 0 anywhere                             0 MSB-preserved-miss blocks across 0 rows (expected-miss category for smooth inpainting, not a bug)
-[PASS] soft: mean px_precision >= 0.80                                            mean=0.9516 (n=864)
+[WARN] soft: n_coincidental_unchanged_px > 0.5% of n_tampered_px                  3 of 2912 tamper rows exceed 0.5% coincidental-unchanged px; e.g. ['87bd1c70b6ab10b9', '30b3580af3cffd9e', '6963351790ed27c6']
+[WARN] soft: n_msb_preserved_miss_blocks > 0 anywhere                             22 MSB-preserved-miss blocks across 22 rows (expected-miss category for smooth inpainting, not a bug)
+[PASS] soft: mean px_precision >= 0.80                                            mean=0.9614 (n=2912)
 ----------------------------------------------------------------------------------------
-19 passed, 1 failed, 3 skipped, 0 warnings -- overall: FAIL
+25 passed, 0 failed, 0 skipped, 2 warnings -- overall: PASS
