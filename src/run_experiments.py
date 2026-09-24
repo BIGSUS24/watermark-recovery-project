@@ -712,6 +712,100 @@ def _print_final_summary(csv_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------
+# Phase E (PLAN-FIXES.md): Variant A vs C vs D, focused comparison -- NOT the full grid.
+# --------------------------------------------------------------------------
+# "Do not run the full grid. Run a focused comparison instead: Variant A, C and D on a
+# handful of corpus images across all seven ratios." This is that comparison, invoked
+# separately via --phase-e -- it does not touch main/null/ablation or output/runs.csv.
+
+PHASE_E_IMAGES = ("pepper", "baboon", "kodim04")  # 2 USC-SIPI (one smooth-ish, one
+# high-frequency texture) + 1 Kodak portrait -- deliberately not the 32-image corpus.
+PHASE_E_VARIANTS = ("A", "C", "D")
+PHASE_E_TAMPER = "crop_refill"  # one representative localized-wipe class; the ratio grid,
+# not the tamper-class grid, is the axis this comparison is actually about.
+
+
+def _embed_for_phase_e(raw: np.ndarray, key: bytes, iid: bytes, variant: str, block: int
+                       ) -> tuple[np.ndarray, dict]:
+    """A/C go through the normal embed_image(); D needs fountain.embed() instead -- see
+    fountain.py's module docstring for why embed_image() itself cannot take a variant="D"
+    call directly (its encode_descriptor call site has no key parameter)."""
+    if variant == "D":
+        import fountain
+        return fountain.embed(raw, key, iid, block)
+    return embed_image(raw, key, iid, block=block, variant=variant)
+
+
+def run_phase_e_comparison(seed_base: int = SEED_BASE_DEFAULT) -> list[dict]:
+    """3 images x 3 variants x 7 ratios x 1 tamper class = 63 embed/detect/recover
+    cycles (not the main grid's 1792). Real embed -> tamper -> detect -> recover on real
+    pixels throughout -- PSNR needs real reconstructed images, not the image-free
+    recoverability_rate() shortcut, so there is no faster path worth building here.
+    """
+    samples_by_name = {s["name"]: s for s in load_manifest()}
+    key = make_key(MAIN_KEY_ID)
+    rows: list[dict] = []
+    for name in PHASE_E_IMAGES:
+        s = samples_by_name[name]
+        raw = load_image(s["path"])
+        iid = default_image_id(name, s["shape"], MAIN_BLOCK)
+        for variant in PHASE_E_VARIANTS:
+            wm, _ = _embed_for_phase_e(raw, key, iid, variant, MAIN_BLOCK)
+            for ratio in RATIOS:
+                tres = apply_tamper(wm, PHASE_E_TAMPER, ratio, name, seed_base)
+                received = tres["tampered_image"]
+                gt_px = tres["gt_mask_px"]
+                gt_block = block_mask_from_pixel_mask(gt_px, MAIN_BLOCK)
+                det = detect_image(received, key, iid, block=MAIN_BLOCK, variant=variant)
+                # REQUIREMENT 1 (same as compute_row): recover_image() gets the mask
+                # detect_image PREDICTED, never tamper.py's ground truth.
+                rec = recover_image(received, det, block=MAIN_BLOCK, variant=variant,
+                                    key=key if variant == "D" else None)
+                score = _score_and_recover(wm, received, det, rec, gt_block, gt_px, MAIN_BLOCK)
+                row = {
+                    "image": name, "variant": variant, "ratio": ratio,
+                    "rho": rec.rho,
+                    "psnr_in_region": score["psnr_in_region"],
+                    "psnr_whole_unmarked": score["psnr_whole_unmarked"],
+                    "psnr_whole_marked": score["psnr_whole_marked"],
+                }
+                rows.append(row)
+                print(f"  {name:<10} {variant} ratio={ratio:.2f}  rho={rec.rho:.3f}  "
+                      f"psnr_region={score['psnr_in_region']:.2f}  "
+                      f"psnr_whole_unmarked={score['psnr_whole_unmarked']:.2f}")
+    return rows
+
+
+def print_phase_e_table(rows: list[dict]) -> None:
+    """The deliverable: rho / in-region PSNR / whole-image unmarked PSNR per variant per
+    ratio, averaged over PHASE_E_IMAGES -- what decides whether D ships."""
+    print(f"\n=== Phase E: A vs C vs D, mean over {len(PHASE_E_IMAGES)} images, "
+          f"tamper={PHASE_E_TAMPER} ===")
+    print(f"{'ratio':>6} {'var':>4} {'rho':>8} {'psnr_region':>12} {'psnr_whole_unmk':>17}")
+    for ratio in RATIOS:
+        for variant in PHASE_E_VARIANTS:
+            sub = [r for r in rows if r["ratio"] == ratio and r["variant"] == variant]
+            if not sub:
+                continue
+            rho_mean = sum(r["rho"] for r in sub) / len(sub)
+            reg_vals = [r["psnr_in_region"] for r in sub if r["psnr_in_region"] == r["psnr_in_region"]]
+            reg_mean = sum(reg_vals) / len(reg_vals) if reg_vals else float("nan")
+            whole_mean = sum(r["psnr_whole_unmarked"] for r in sub) / len(sub)
+            print(f"{ratio:>6.2f} {variant:>4} {rho_mean:>8.3f} {reg_mean:>12.2f} {whole_mean:>17.2f}")
+
+
+def save_phase_e_csv(rows: list[dict], path: Path) -> None:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    fields = ["image", "variant", "ratio", "rho", "psnr_in_region",
+             "psnr_whole_unmarked", "psnr_whole_marked"]
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 
@@ -731,6 +825,10 @@ def parse_args() -> argparse.Namespace:
                         f"for (default: {QUALITATIVE_IMAGE_DEFAULT!r})")
     p.add_argument("--selfcheck", action="store_true",
                    help="run the internal self-check (no corpus/network needed) and exit")
+    p.add_argument("--phase-e", action="store_true",
+                   help="PLAN-FIXES.md Phase E: focused Variant A/C/D comparison "
+                        "(3 images x 3 variants x 7 ratios x 1 tamper class) instead of "
+                        "the full grid; writes output/phase_e_comparison.csv")
     p.add_argument("--skip-refinement-only-recovery", action="store_true",
                    help="#32: do not recover blocks flagged only by refine_mask's "
                         "neighbourhood fill (own tag matched) -- default off, matching "
@@ -745,6 +843,14 @@ def main() -> None:
     if args.selfcheck:
         _selfcheck()
         print("run_experiments.py self-check OK")
+        return
+
+    if args.phase_e:
+        rows = run_phase_e_comparison(args.seed_base)
+        print_phase_e_table(rows)
+        out_path = OUTPUT_DIR / "phase_e_comparison.csv"
+        save_phase_e_csv(rows, out_path)
+        print(f"\nwrote {out_path}")
         return
 
     t_start = time.perf_counter()

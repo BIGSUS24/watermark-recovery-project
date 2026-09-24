@@ -29,7 +29,7 @@ KEY_LABEL_TAG = b"wgtlr/v1/tag"
 KEY_LABEL_MAP = b"wgtlr/v1/map"
 
 # Format magic + variant codes for the tag message header (see block_tags).
-VARIANT_CODE = {"A": 1, "B": 2, "C": 3}
+VARIANT_CODE = {"A": 1, "B": 2, "C": 3, "D": 4}
 
 # JPEG-50 luminance quantization table read in zig-zag order, DC entry replaced by 8.
 DELTA_ZZ = np.array([8, 11, 12, 14, 12, 10, 16, 14, 13, 14, 18, 17, 16, 19, 24, 40],
@@ -127,6 +127,27 @@ for _m in (0, 1):
     assert sum(C_BITS[_m]) + C_MODE_BITS == C_DESC_BITS, sum(C_BITS[_m])
     # A position with bits must have a step, and a position without bits must not.
     assert all((w > 0) == (s > 0) for w, s in zip(C_BITS[_m], C_STEPS[_m]))
+
+
+# --------------------------------------------------------------------------
+# Variant D -- fountain-coded (LT/Robust-Soliton) recovery descriptors (PLAN-FIXES.md
+# Phase E; full design/rationale in fountain.py's module docstring). Additive: does not
+# touch A/B/C's behaviour or golden vectors.
+# --------------------------------------------------------------------------
+# Each 96-bit descriptor slot holds fountain.RATE (3) coded 32-bit symbols instead of
+# one block's own 96-bit descriptor. The source symbol itself is a coarser 32-bit DCT
+# descriptor -- reusing Variant A's own machinery unmodified at desc_bits=32 (see the
+# "D" branch below) -- not a new transform. block=8 only, like C.
+D_DESC_BITS = 96  # 3 * fountain.SYMBOL_BITS
+
+
+def _d_check(block: int, desc_bits: int) -> None:
+    """Variant D is a block=8 format, same reason as C: fail loudly rather than mis-pack."""
+    if block != 8 or desc_bits != D_DESC_BITS:
+        raise ValueError(
+            f"variant D is defined for block=8 / {D_DESC_BITS} descriptor bits only "
+            f"(3 coded 32-bit fountain symbols per slot -- see fountain.py), "
+            f"got block={block} / desc_bits={desc_bits}.")
 
 
 # --------------------------------------------------------------------------
@@ -540,6 +561,22 @@ def encode_descriptor(blocks_msb: np.ndarray, variant: str, desc_bits: int
             np.stack([c[1] for c in cand]), chosen[None, :], axis=0).sum())
         return bits, n_sat
 
+    if variant == "D":
+        _d_check(B, desc_bits)
+        K = blocks_msb.shape[0]
+        # Source symbol: Variant A's own DCT machinery, unmodified, at a coarser 32-bit
+        # budget (4 zig-zag coefficients instead of 12) -- the actual trade this variant
+        # makes, per fountain.py's module docstring, is spending fewer bits per block so
+        # there is redundancy left to code.
+        src_bits, n_clip = encode_descriptor(blocks_msb, "A", 32)
+        # Local import: fountain.py imports payload's KDF helpers at module level, so
+        # importing it back at payload's module level would be circular. By the time this
+        # branch actually runs, both modules are already fully loaded.
+        import fountain
+        graph = fountain.graph_from_context(K)   # raises RuntimeError with no active context
+        coded = fountain.encode(src_bits, graph)  # (RATE*K, 32) bits
+        return coded.reshape(K, fountain.RATE * fountain.SYMBOL_BITS), n_clip
+
     raise ValueError(f"unknown variant {variant!r}")
 
 
@@ -589,6 +626,18 @@ def decode_descriptor(desc: np.ndarray, variant: str, block: int) -> np.ndarray:
         # only alternative, and K is 4096-16384 per channel.
         both = np.stack([_c_idct(_c_unpack(desc, m), B) for m in (0, 1)])
         return np.where(mode[:, None, None] == 1, both[1], both[0])
+
+    if variant == "D":
+        # Cannot be decoded per-row: the peeling decoder needs the FULL image's erasure
+        # pattern (which coded-symbol-holding blocks verified authentic), not a row
+        # subset -- that is inherent to how a fountain code differs from A/B/C's
+        # per-block-independent descriptors, not a missing feature. recover.py's
+        # variant=="D" branch calls fountain.decode(...) directly with that global
+        # information instead of routing through this function.
+        raise NotImplementedError(
+            "variant D cannot be decoded per-row via decode_descriptor -- use "
+            "recover_image(..., variant='D', key=...), or call fountain.decode(...) "
+            "directly with the full erasure pattern. See fountain.py's module docstring.")
 
     raise ValueError(f"unknown variant {variant!r}")
 
@@ -752,6 +801,55 @@ if __name__ == "__main__":
         except ValueError:
             pass
 
+    # ---------------- variant D (fountain source encoding) ----------------
+    # encode_descriptor's own job here is just the mechanical bit-packing (the 32-bit
+    # source descriptor plus the fountain XOR combine); the peeling DECODER is exercised
+    # in fountain.py's own __main__, which is where the real algorithmic content lives.
+    import fountain as _fountain
+
+    KD = 64  # 8x8 block grid -- see the (64, 64)/block=8 context below
+    blkD = msb(rng.integers(0, 256, (KD, 8, 8), dtype=np.uint8))
+
+    # No active context -> loud failure, not a silently-unkeyed graph.
+    try:
+        encode_descriptor(blkD, "D", 96)
+        raise SystemExit("expected RuntimeError: no fountain context set")
+    except RuntimeError:
+        pass
+
+    _fountain.set_context(b"payload-selfcheck-key", b"payload-selfcheck-id", (64, 64), 8)
+    try:
+        dD, nclipD = encode_descriptor(blkD, "D", 96)
+        dD2, _ = encode_descriptor(blkD, "D", 96)  # same context/content -> identical bits
+    finally:
+        _fountain.clear_context()
+    assert dD.shape == (KD, 96) and dD.dtype == np.uint8 and set(np.unique(dD)) <= {0, 1}
+    assert isinstance(nclipD, int) and nclipD >= 0
+    assert np.array_equal(dD, dD2), "variant D encoding must be deterministic"
+
+    # decode_descriptor must refuse a per-row decode rather than mis-decode silently --
+    # see decode_descriptor's "D" branch for why a per-row API cannot work here at all.
+    try:
+        decode_descriptor(dD[:1], "D", 8)
+        raise SystemExit("expected NotImplementedError for per-row variant D decode")
+    except NotImplementedError:
+        pass
+
+    # D is a block=8 / 96-bit format, exactly like C -- must refuse other geometry loudly.
+    for bad_block, bad_bits in ((4, 16), (8, 64)):
+        _fountain.set_context(b"k", b"id", (64, 64), bad_block)
+        try:
+            encode_descriptor(msb(rng.integers(0, 256, (2, bad_block, bad_block),
+                                               dtype=np.uint8)), "D", bad_bits)
+            raise SystemExit(f"expected ValueError for variant D at block={bad_block}")
+        except ValueError:
+            pass
+        finally:
+            _fountain.clear_context()
+
+    print("payload.py: variant D fountain descriptor encodes deterministically "
+          "and refuses bad geometry/missing context")
+
     # tag: five separate one-bit-change sensitivity asserts, plus LSB-blindness
     KEY = b"key-one"
     KEY2 = b"key-two"
@@ -762,6 +860,7 @@ if __name__ == "__main__":
     assert not np.array_equal(t0, block_tags(blk8, KEY, b"ID", (64, 64), 8, 1, "A", 32))   # channel binding
     assert not np.array_equal(t0, block_tags(blk8, KEY, b"ID", (64, 64), 8, 0, "B", 32))   # variant binding
     assert not np.array_equal(t0, block_tags(blk8, KEY, b"ID", (64, 64), 8, 0, "C", 32))   # ... incl. C
+    assert not np.array_equal(t0, block_tags(blk8, KEY, b"ID", (64, 64), 8, 0, "D", 32))   # ... and D
     assert not np.array_equal(t0, block_tags(blk8, KEY2, b"ID", (64, 64), 8, 0, "A", 32))  # key binding
     blk2 = blk8.copy()
     blk2[0, 0, 0] ^= 0x04  # flip an MSB-plane bit

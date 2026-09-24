@@ -73,7 +73,8 @@ def _recover_reverse(out: np.ndarray, det: DetectResult, block: int, variant: st
 def recover_image(received: np.ndarray, det: DetectResult, block: int = 8,
                   variant: str = "A", mark_unrecoverable: bool = True,
                   mark_value: int = 0, skip_refinement_only: bool = False,
-                  _iter_order: str = "forward") -> RecoverResult:
+                  _iter_order: str = "forward",
+                  key: bytes | str | None = None) -> RecoverResult:
     """Reconstruct flagged blocks from their partner-held descriptors; mark the rest unrecoverable.
 
     `skip_refinement_only` (#32, default False = today's behaviour): a block whose OWN
@@ -84,6 +85,12 @@ def recover_image(received: np.ndarray, det: DetectResult, block: int = 8,
     the original MSB planes (see tamper.py's tamper_inpaint_removal docstring), so
     skipping it is not a strict improvement -- it is measured on the full grid, not
     switched on by default, per #32's spec.
+
+    `key` is required ONLY for variant "D" (PLAN-FIXES.md Phase E): A/B/C's
+    decode_descriptor is a pure per-block function of the bits it is handed, but
+    Variant D's peeling decoder has to rebuild the same key-seeded fountain graph
+    encode-time used (see fountain.py) -- and unlike the 1-to-1 map's `m`, that graph
+    is never stashed on `det`, so recover needs the key again here.
     """
     if received.dtype != np.uint8:
         raise ValueError(f"recover_image requires uint8 input, got dtype {received.dtype}")
@@ -126,9 +133,34 @@ def recover_image(received: np.ndarray, det: DetectResult, block: int = 8,
     m = det.m
     T = d == 1
     avail = d[m] == 0                   # the holder of block i's descriptor is authentic
-    U = T & ~avail                      # unrecoverable
-    R = T & avail                       # recoverable
-    t, u, r = int(T.sum()), int(U.sum()), int(R.sum())
+    t = int(T.sum())
+
+    is_fountain = variant == "D"
+    if is_fountain:
+        # No per-block sequential write order to be wrong about -- decoding is one
+        # global peel over the whole erasure pattern, not a loop reading partner
+        # descriptors one block at a time -- so the ordering bug _recover_reverse
+        # exists to catch structurally cannot occur here. See fountain.py.
+        if _iter_order == "reverse":
+            raise NotImplementedError(
+                "variant D has no per-block recovery order to test in reverse -- "
+                "see recover_image's is_fountain branch")
+        if key is None:
+            raise ValueError(
+                "recover_image(variant='D') requires `key` -- the peeling decoder must "
+                "rebuild the same key-seeded fountain graph embed time used")
+        import fountain
+        K = d.shape[0]
+        graph = fountain.get_graph(key, det.info["image_id"], det.info["shape"], block, K)
+        # A whole coded triplet lives in one physical block, so it is erased as a unit:
+        # `avail` is the SAME per-row authenticity check the 1-to-1 map uses, just
+        # broadcast over the 3 coded symbols that row's holder block carries.
+        erased = np.repeat(~avail, fountain.RATE)
+        U = R = None  # filled in per-channel below, then reconciled after the loop
+    else:
+        U = T & ~avail                      # unrecoverable
+        R = T & avail                       # recoverable
+        u, r = int(U.sum()), int(R.sum())
 
     # PROPERTY 3: every write below lands in `out = img.copy()`, never in-place on `img`
     # (the array the mask/descriptors were computed from) or on `received`.
@@ -136,6 +168,32 @@ def recover_image(received: np.ndarray, det: DetectResult, block: int = 8,
 
     if _iter_order == "reverse":
         _recover_reverse(out, det, block, variant, R, U, mark_unrecoverable, mark_value)
+    elif is_fountain:
+        solved_ref = None
+        for ch, plane in enumerate(_planes(out)):
+            blocks = to_blocks(plane, block)
+            coded = det.desc_by_owner[ch].reshape(K * fountain.RATE, fountain.SYMBOL_BITS)
+            recovered_src, solved = fountain.decode(coded, erased, graph, K)
+            # Solvability depends only on the erasure pattern + graph, never on which
+            # channel's actual bits are being decoded -- so every channel must agree.
+            # A mismatch here would mean this invariant is false, not that a channel
+            # is "harder": worth a hard assert, not a silent per-channel mask.
+            if solved_ref is None:
+                solved_ref = solved
+            else:
+                assert np.array_equal(solved, solved_ref), (
+                    "fountain decode solvability differed across channels -- "
+                    "should be impossible (see recover_image's is_fountain branch)")
+            Rc, Uc = T & solved, T & ~solved
+            if Rc.any():
+                # The source symbol was itself Variant-A-encoded (see payload.
+                # encode_descriptor's "D" branch) -- decode it the same way.
+                blocks[Rc] = decode_descriptor(recovered_src[Rc], "A", block)
+            if mark_unrecoverable and Uc.any():
+                blocks[Uc] = mark_value
+            plane[:] = from_blocks(blocks, (H, W), block)
+        R, U = T & solved_ref, T & ~solved_ref
+        r, u = int(R.sum()), int(U.sum())
     else:
         # Production path: boolean fancy-assignment, no per-block loop at all.
         for ch, plane in enumerate(_planes(out)):
@@ -279,6 +337,52 @@ if __name__ == "__main__":
     assert rec_on.counts["tampered"] == 0 and rec_on.rho == 1.0
     assert rec_off.counts["tampered"] == 1  # default behaviour: unchanged from before #32
     print("(g) skip_refinement_only leaves refinement-only-flagged blocks untouched -- OK")
+
+    # (h) Variant D (PLAN-FIXES.md Phase E): fountain recovery through the real
+    # embed -> tamper -> detect -> recover pipeline, not just fountain.py's isolated
+    # algorithm check. Demonstrates BOTH halves of the honesty requirement: it recovers
+    # essentially everything below the decoding threshold, and it fails -- loudly, via a
+    # low reported rho, never a crash or fabricated content -- above it.
+    import fountain
+    img_d = _synthetic_natural(256)
+    wm_d, _ = fountain.embed(img_d, KEY, ID, 8)
+    det_clean_d = detect_image(wm_d, KEY, ID, 8, "D", refine=False)
+    assert det_clean_d.raw_mask.sum() == 0, "clean Variant D watermark failed to self-authenticate"
+
+    Rg_d = 256 // 8
+    # Below the measured cliff (~alpha=0.63, see fountain.py/run_experiments.py): a
+    # block-row-aligned wipe covering ~30% of blocks should decode essentially fully.
+    rows_low = round(0.30 * Rg_d) * 8
+    tam_low = wm_d.copy(); tam_low[:rows_low, :] = 0
+    det_low = detect_image(tam_low, KEY, ID, 8, "D")
+    rec_low = recover_image(tam_low, det_low, 8, "D", key=KEY)
+    assert rec_low.rho > 0.99, rec_low.rho
+
+    # Above it: a peeling decoder fails SHARPLY, not gracefully -- this must leave most
+    # of the tampered region genuinely unrecoverable (rho far below what the 1-to-1 map
+    # would give at the same ratio, i.e. 1-alpha ~= 0.15), not silently degrade.
+    rows_high = round(0.85 * Rg_d) * 8
+    tam_high = wm_d.copy(); tam_high[:rows_high, :] = 0
+    det_high = detect_image(tam_high, KEY, ID, 8, "D")
+    rec_high = recover_image(tam_high, det_high, 8, "D", key=KEY)
+    assert rec_high.rho < 0.5, rec_high.rho
+
+    # key is mandatory for D -- a missing key must fail loudly, not silently build an
+    # unkeyed graph or crash somewhere unrelated.
+    try:
+        recover_image(tam_low, det_low, 8, "D")
+        raise SystemExit("expected ValueError: recover_image(variant='D') needs a key")
+    except ValueError:
+        pass
+    # D has no per-block order to test in reverse (see recover_image's is_fountain branch).
+    try:
+        recover_image(tam_low, det_low, 8, "D", key=KEY, _iter_order="reverse")
+        raise SystemExit("expected NotImplementedError for variant D _iter_order='reverse'")
+    except NotImplementedError:
+        pass
+
+    print(f"(h) variant D: rho={rec_low.rho:.3f} at alpha=0.30 (below cliff), "
+          f"rho={rec_high.rho:.3f} at alpha=0.85 (above cliff) -- OK")
 
     print("recover.py self-check OK")
 

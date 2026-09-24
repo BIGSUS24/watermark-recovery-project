@@ -121,6 +121,45 @@ def test_tamper_smoke() -> None:
     print("test_tamper_smoke OK")
 
 
+def test_variant_d_roundtrip() -> None:
+    """Variant D (PLAN-FIXES.md Phase E, additive): fountain embed/detect/recover through
+    the real pipeline, below and above the measured decoding cliff (~alpha=0.63 -- see
+    fountain.py and run_experiments.py's Phase E comparison). Fully additive: does not
+    touch the golden-vector loop above, and A/B/C's 50 checks and 9 pinned vectors are
+    unaffected by anything in this function.
+    """
+    import fountain
+    from recover import recover_image
+
+    KEY = b"e2e-variant-d-key"
+    img = _synthetic_natural(256)
+    wm, _ = fountain.embed(img, KEY, b"e2e-d", 8)
+    det = detect_image(wm, KEY, b"e2e-d", 8, "D", refine=False)
+    assert det.raw_mask.sum() == 0, "clean Variant D watermark failed to self-authenticate"
+
+    Rg = 256 // 8
+    # Below the cliff: a block-row-aligned wipe covering ~30% of blocks should decode
+    # essentially fully -- 3*(1-0.30) = 2.1x redundancy, comfortably above the ~1.05x a
+    # peeling decoder needs.
+    rows_low = round(0.30 * Rg) * 8
+    tam_low = wm.copy(); tam_low[:rows_low, :] = 0
+    det_low = detect_image(tam_low, KEY, b"e2e-d", 8, "D")
+    rec_low = recover_image(tam_low, det_low, 8, "D", key=KEY)
+    assert rec_low.rho > 0.99, rec_low.rho
+
+    # Above the cliff: a peeling decoder fails SHARPLY, not gracefully -- this must
+    # report most of the tampered region genuinely unrecoverable, not silently degrade
+    # to something resembling the 1-to-1 map's 1-alpha ~= 0.15.
+    rows_high = round(0.85 * Rg) * 8
+    tam_high = wm.copy(); tam_high[:rows_high, :] = 0
+    det_high = detect_image(tam_high, KEY, b"e2e-d", 8, "D")
+    rec_high = recover_image(tam_high, det_high, 8, "D", key=KEY)
+    assert rec_high.rho < 0.5, rec_high.rho
+
+    print(f"test_variant_d_roundtrip OK (rho={rec_low.rho:.3f} @ alpha=0.30 below cliff, "
+          f"rho={rec_high.rho:.3f} @ alpha=0.85 above cliff)")
+
+
 # --------------------------------------------------------------------------
 # Golden vectors -- the bit-exactness canary
 # --------------------------------------------------------------------------
@@ -230,5 +269,6 @@ if __name__ == "__main__":
         sys.exit(0)
     test_keystone()
     test_tamper_smoke()
+    test_variant_d_roundtrip()
     test_golden_vectors()
     print("test_e2e.py: keystone gate PASSED (50/50)")
