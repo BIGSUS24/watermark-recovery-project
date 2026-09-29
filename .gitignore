@@ -69,3 +69,6 @@ output/paper/*.aux
 output/paper/*.log
 output/paper/_*.docx
 output/paper/_*.tex
+
+# local db backups
+webapp/library.db.bak-*
