@@ -58,7 +58,7 @@ CHAPTERS = [
     (4, "SOFTWARE REQUIREMENTS SPECIFICATION", "ch4.txt"),
     (5, "SYSTEM DESIGN", "ch5.txt"),
     (6, "OTHER SPECIFICATION", "ch6.txt"),
-    (7, "RESULTS, CONCLUSIONS AND FUTURE WORK", "ch7.txt"),
+    (7, "CONCLUSIONS AND FUTURE WORK", "ch7.txt"),
 ]
 
 FIGURES = {
@@ -83,12 +83,12 @@ FIGURES = {
                           "and 4.0.", 5.8),
     "5.7": ("fig5_7.png", "Entity-relationship diagram of the protected-image library.",
             5.8),
-    "5.8": ("fig5_8.png", "Use case diagram.", 5.4),
+    "5.8": ("fig5_8.png", "Use case diagram.", 5.8),
     "5.9": ("fig5_9.png", "Class diagram. Dashed arrows are dependencies and point at "
                           "the class whose operations are used.", 5.8),
     "5.10": ("fig5_10.png", "Sequence diagram for the protect, damage, verify and repair "
                             "round trip.", 5.8),
-    "5.11": ("fig5_11.png", "Activity diagram for verification and recovery.", 4.9),
+    "5.11": ("fig5_11.png", "Activity diagram for verification and recovery.", 5.8),
     "5.12": ("fig5_12.png", "State machine diagram: the lifecycle of a protected image.",
              5.8),
     "5.13": ("fig5_13.png", "Component diagram.", 5.8),
@@ -274,7 +274,7 @@ def para(doc, text="", size=BODY, bold=False, italic=False, align=None,
 
 
 def body_para(doc, text):
-    return para(doc, text, align=WD_ALIGN_PARAGRAPH.JUSTIFY, after=6, indent=0.30)
+    return para(doc, text, align=WD_ALIGN_PARAGRAPH.JUSTIFY, after=5, indent=0.30)
 
 
 def bullet(doc, text):
@@ -286,6 +286,13 @@ def bullet(doc, text):
     pf.first_line_indent = Inches(-0.25)
     p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     set_run(p.add_run(text))
+    return p
+
+
+def add_logo(doc, width=1.15, before=0, after=6):
+    p = para(doc, align=WD_ALIGN_PARAGRAPH.CENTER, before=before, after=after,
+             spacing=1.0)
+    p.add_run().add_picture(str(FIGS / "logo.png"), width=Inches(width))
     return p
 
 
@@ -306,7 +313,7 @@ def sub_heading(doc, text):
                 before=9, after=5, spacing=1.0, keep=True)
 
 
-MAX_FIG_H = 4.25  # inches; keeps two illustrations per page as the format requires
+MAX_FIG_H = 3.00  # inches; keeps two illustrations per page as the format requires
 
 
 def fig_width(fn, width):
@@ -520,7 +527,8 @@ def cover_page(doc):
     para(doc, "Under the Guidance of", 12, align=WD_ALIGN_PARAGRAPH.CENTER,
          spacing=1.0, before=16, after=4)
     para(doc, GUIDE, 12, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, spacing=1.0,
-         after=20)
+         after=8)
+    add_logo(doc, width=1.25, after=14)
     para(doc, DEPT, 12, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, spacing=1.0, after=0)
     para(doc, COLLEGE, 12, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, spacing=1.0,
          after=0)
@@ -530,6 +538,7 @@ def cover_page(doc):
 
 
 def certificate_page(doc):
+    add_logo(doc, width=1.25, before=6, after=10)
     para(doc, COLLEGE, 14, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, spacing=1.0,
          after=2)
     para(doc, DEPT, 12, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, spacing=1.0, after=24)
@@ -632,37 +641,36 @@ def abstract_page(doc):
 
 
 def list_page(doc, title, rows, widths, header=None):
+    """Plain tab-aligned columns, as the template prints them -- no borders."""
     para(doc, title, 14, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, spacing=1.0,
-         after=18)
-    t = doc.add_table(rows=0, cols=len(widths))
-    t.style = "Table Grid"
-    t.alignment = WD_TABLE_ALIGNMENT.CENTER
-    t.autofit = False
+         after=16)
+    stops = []
+    x = 0.45
+    for w in widths[:-1]:
+        stops.append(x)
+        x += w
+    right = sum(widths) + 0.45
+
+    def row(vals, bold=False, caps=False):
+        q = doc.add_paragraph()
+        qf = q.paragraph_format
+        qf.line_spacing = 1.0
+        qf.space_after = Pt(6)
+        for st in stops[1:]:
+            qf.tab_stops.add_tab_stop(Inches(st), WD_TAB_ALIGNMENT.LEFT)
+        if len(vals) > 2:
+            qf.tab_stops.add_tab_stop(Inches(right), WD_TAB_ALIGNMENT.RIGHT)
+        qf.left_indent = Inches(stops[0])
+        qf.first_line_indent = Inches(0)
+        text = "\t".join(str(v) for v in vals[1:])
+        set_run(q.add_run(str(vals[0]) + "\t" + text), 11.5, bold=bold)
+        return q
+
     if header:
-        cells = t.add_row().cells
-        for i, h in enumerate(header):
-            p = cells[i].paragraphs[0]
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            p.paragraph_format.line_spacing = 1.0
-            set_run(p.add_run(h), 12, bold=True)
-            shade(cells[i], "D9D9D9")
-        trPr = t.rows[0]._tr.get_or_add_trPr()
-        el = OxmlElement("w:tblHeader")
-        el.set(qn("w:val"), "true")
-        trPr.append(el)
-    for row in rows:
-        cells = t.add_row().cells
-        for i, v in enumerate(row):
-            p = cells[i].paragraphs[0]
-            p.paragraph_format.line_spacing = 1.0
-            p.paragraph_format.space_before = Pt(2)
-            p.paragraph_format.space_after = Pt(2)
-            if i == len(row) - 1 and len(widths) > 2:
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            set_run(p.add_run(str(v)), 11)
-    for r in t.rows:
-        for i, w in enumerate(widths):
-            r.cells[i].width = Inches(w)
+        row(header, bold=True)
+        para(doc, "", 6, after=4, spacing=1.0)
+    for r in rows:
+        row(r)
 
 
 # ------------------------------------------------------------------- the build
@@ -696,44 +704,80 @@ def build(pages=None):
     def pg(key):
         return P.get(key, "")
 
-    dotted_row(doc, "ACKNOWLEDGEMENT", pg("front:ack"), bold=True)
-    dotted_row(doc, "ABSTRACT", pg("front:abs"), bold=True)
-    dotted_row(doc, "LIST OF ABBREVIATIONS", pg("front:abbr"), bold=True)
-    dotted_row(doc, "LIST OF FIGURES", pg("front:figs"), bold=True)
-    dotted_row(doc, "LIST OF TABLES", pg("front:tabs"), bold=True, after=12)
-    doc.add_paragraph()
+    for label, key in [("LIST OF ABBREVIATIONS", "front:abbr"),
+                       ("LIST OF FIGURES", "front:figs"),
+                       ("LIST OF TABLES", "front:tabs")]:
+        q = doc.add_paragraph()
+        qf = q.paragraph_format
+        qf.line_spacing = 1.0
+        qf.space_after = Pt(2)
+        qf.left_indent = Inches(0.6)
+        qf.tab_stops.add_tab_stop(Inches(4.6), WD_TAB_ALIGNMENT.RIGHT)
+        set_run(q.add_run(label + "\t" + str(pg(key))), BODY)
+    para(doc, "", 6, after=12, spacing=1.0)
 
-    # the body index is laid out below; the rows are written from TOC_ROWS, which the
-    # first pass fills by walking the same chapter files
+    t = doc.add_table(rows=1, cols=3)
+    t.style = "Table Grid"
+    t.alignment = WD_TABLE_ALIGNMENT.CENTER
+    t.autofit = False
+    widths = [0.95, 4.05, 0.85]
+    for i, h in enumerate(["Sr.No.", "Title of Chapter", "Page No."]):
+        c = t.rows[0].cells[i]
+        q = c.paragraphs[0]
+        q.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        q.paragraph_format.line_spacing = 1.0
+        q.paragraph_format.space_after = Pt(1)
+        q.paragraph_format.space_before = Pt(1)
+        set_run(q.add_run(h), BODY, bold=True)
+        shade(c, "D9D9D9")
+    trPr = t.rows[0]._tr.get_or_add_trPr()
+    el = OxmlElement("w:tblHeader")
+    el.set(qn("w:val"), "true")
+    trPr.append(el)
+
+    def toc_row(sr, title, page, bold=False, indent=0.0):
+        cells = t.add_row().cells
+        for i, v in enumerate((sr, title, page)):
+            q = cells[i].paragraphs[0]
+            q.paragraph_format.line_spacing = 1.0
+            q.paragraph_format.space_after = Pt(1)
+            q.paragraph_format.space_before = Pt(1)
+            if i == 0:
+                q.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                q.paragraph_format.left_indent = Inches(indent)
+            elif i == 2:
+                q.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            set_run(q.add_run(str(v)), 11, bold=bold)
+
     for kind, key, label in TOC_ROWS:
         if kind == "chapter":
-            dotted_row(doc, f"CHAPTER {key}:  {label}", pg(f"ch:{key}"), bold=True,
-                       before=8)
-        elif kind == "sec":
-            dotted_row(doc, label, pg(f"sec:{key}"), indent=0.3)
+            toc_row(f"{int(key):02d}", label.title(), pg(f"ch:{key}"), bold=True)
         else:
-            dotted_row(doc, label, pg(f"sec:{key}"), indent=0.6)
-    dotted_row(doc, "REFERENCES", pg("back:ref"), bold=True, before=8)
-    dotted_row(doc, "APPENDIX A:  FEASIBILITY ASSESSMENT, SATISFIABILITY ANALYSIS AND "
-                    "COMPLEXITY CLASSIFICATION", pg("back:appA"), bold=True)
-    dotted_row(doc, "APPENDIX B:  DETAILS OF THE PAPERS REFERRED", pg("back:appB"),
-               bold=True)
-    dotted_row(doc, "APPENDIX C:  PLAGIARISM REPORT", pg("back:appC"), bold=True)
+            num, _, name = label.partition(" ")
+            toc_row(num, name, pg(f"sec:{key}"), indent=0.12 if kind == "sec" else 0.26)
+    toc_row("", "References", pg("back:ref"), bold=True)
+    toc_row("", "Appendix A: Feasibility Assessment, Satisfiability Analysis and "
+                "Complexity Classification", pg("back:appA"), bold=True)
+    toc_row("", "Appendix B: Details of the Papers Referred", pg("back:appB"), bold=True)
+    toc_row("", "Appendix C: Plagiarism Report", pg("back:appC"), bold=True)
+    for r in t.rows:
+        for i, w in enumerate(widths):
+            r.cells[i].width = Inches(w)
 
     doc.add_page_break()
     list_page(doc, "LIST OF ABBREVIATIONS",
-              [[a, b] for a, b in ABBREVIATIONS], [1.6, 4.25],
+              [[a, b] for a, b in ABBREVIATIONS], [1.25, 3.95],
               ["Abbreviation", "Illustration"])
     doc.add_page_break()
     order = sorted(FIG_ORDER, key=lambda k: [int(x) for x in k.split(".")])
     list_page(doc, "LIST OF FIGURES",
               [[k, SHORT_FIG[k], pg(f"fig:{k}")] for k in order],
-              [0.85, 4.15, 0.85], ["Figure", "Illustration", "Page No."])
+              [0.95, 3.95, 0.45], ["Figure", "Illustration", "Page No."])
     doc.add_page_break()
     order = sorted(TAB_ORDER, key=lambda k: [int(x) for x in k.split(".")])
     list_page(doc, "LIST OF TABLES",
               [[k, SHORT_TAB.get(k, tables[k][0]), pg(f"tab:{k}")] for k in order],
-              [0.85, 4.15, 0.85], ["Table", "Illustration", "Page No."])
+              [0.95, 3.95, 0.45], ["Table", "Illustration", "Page No."])
 
     # ---- body, arabic from 1
     new_section(doc, "decimal", start=1)

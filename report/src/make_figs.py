@@ -497,7 +497,7 @@ def fig_5_7():
 
 # ----------------------------------------------------------------- Fig 5.8
 def fig_5_8():
-    fig, ax = canvas(7.0, 5.0)
+    fig, ax = canvas(7.8, 4.1)
     ax.add_patch(Rectangle((27, 2), 46, 94, facecolor=WHITE, edgecolor="black", lw=1.1))
     ax.text(50, 92, "Watermarking System", fontsize=8.5, ha="center", fontweight="bold")
 
@@ -635,7 +635,7 @@ def fig_5_10():
 
 # ----------------------------------------------------------------- Fig 5.11
 def fig_5_11():
-    fig, ax = canvas(5.6, 4.6)
+    fig, ax = canvas(7.4, 4.0)
     ax.add_patch(Circle((50, 96), 2.0, facecolor="black"))
     a = box(ax, 28, 85, 44, 7.5, "Read received image, key and identifier", fs=6.8, fill=LIGHT)
     b = box(ax, 28, 75, 44, 7.5, "Extract 128 payload bits from block i", fs=6.8, fill=LIGHT)

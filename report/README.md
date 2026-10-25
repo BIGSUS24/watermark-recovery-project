@@ -27,6 +27,9 @@ bold 14 pt upper case centred, figure captions below at 12 pt, the ADYPSOE foote
 and a centred page number on every page, small roman front matter and arabic
 numbering restarting at 1 from the introduction.
 
-Chapters 1-7 run to 48 pages against the format's 30-40. Fill the student and
+Chapters 1-7 run to 43 pages against the format's 30-40. The cover page and
+certificate carry the college logo, the table of contents is the bordered
+three-column table the template prints, and the three lists are plain
+tab-aligned columns, all as shown on template pages P1-P3. Fill the student and
 guide placeholders before printing, and attach the plagiarism report at
 Appendix C.
