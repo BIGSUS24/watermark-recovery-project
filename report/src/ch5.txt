@@ -1,0 +1,143 @@
+@@SEC 5.1 System Architecture
+
+The system is organized as four decoupled stages. Stage one is embedding, which runs at or near the point of acquisition and turns an original image into a watermarked one. Stage two is distribution, during which the image may be stored, copied, transmitted and, in the adversarial case, tampered with; in this project that stage is simulated by the evaluation harness, which applies four classes of tampering with exact ground-truth masks. Stage three is verification and localization, which can run at any later time and by any party holding the key. Stage four is recovery, which repairs the flagged content where the surviving watermark allows it. The stages communicate only through the image itself and a block mask, so each can be developed, tested and replaced independently. Stages one, three and four depend on the key, while the distribution stage requires no cooperation from the system at all, which is what allows an image to travel through ordinary storage and transfer channels between protection and verification, provided those channels are lossless.
+
+The decisive property of the architecture is what stage three does not need. Verification requires only the received image, the secret key and the image identifier. It needs no original image, no reference database, no network call and no model weights. Every positive detection reduces to one recomputed keyed hash compared against a stored value, so a third party holding the key can repeat the decision bit for bit. This is the practical advantage of an active scheme operating inside an institutional custody chain, and it is the reason the scheme is deterministic and free of run-to-run variance.
+
+Fig. 5.1 shows the data path. The upper row is the embedding stage: the original image I passes through block partition, descriptor encoding, the key-seeded block map and the keyed tag (HMAC) to give the watermarked image Iw. The lower row is the verification and recovery stages: the received image I' passes through LSB extraction, tag recomputation and the tamper mask with refinement, then into the recovery engine, which produces the repaired image. A dashed path from Iw to I' represents distribution. The secret key and the image identifier feed both the block map and the tag stage.
+
+[[FIG 5.1]]
+
+The software mirrors this decomposition. The payload module is the foundation imported by all others: it holds key derivation, the bit budget, block geometry, the MSB projection, tag computation, descriptor encoding and decoding, and LSB packing. The blockmap module builds the key-seeded permutation and verifies its properties. The embed module implements stage one, detect implements stage three, and recover implements stage four. The tamper module generates the evaluation attacks, metrics computes image-quality and localization scores, run_experiments drives the full result grid, and sanity_gate validates that grid before any table or figure is produced. Two applications sit over the same pipeline: a Flask web application with a SQLite library, and a Streamlit demonstration interface. Table 5.2 summarizes the responsibilities.
+
+[[TABLE 5.2]]
+
+@@SEC 5.2 Mathematical Model
+
+Let I in {0,...,255}^(MxN) be the host image, Ks the secret key and ID an image identifier. The image is partitioned into non-overlapping BxB blocks in raster order, and b_i denotes the i-th block for i = 0,...,K-1, with c(i) its center coordinate. Dimensions that are not a multiple of B are cropped rather than padded, so no synthetic content is ever authenticated. The model below follows the order in which the quantities are used: first the bit budget that fixes what each block can carry, then the projection that makes embedding safe, then the mapping, the descriptor, the tag, and finally the two measures of behavior, recoverability and cost.
+
+The first quantity is the capacity of a block. Two bit-planes of B^2 pixels give 2B^2 bits, of which a fixed-length tag takes at most half and the descriptor takes the rest.
+
+@@EQ cap(B) = 2B^2,   t(B) = min(32, cap(B)/2),   d(B) = cap(B) - t(B)
+
+At B = 8 the triple (capacity, tag, descriptor) is (128, 32, 96) bits. At B = 4 the capacity falls to 32 bits and the tag shrinks accordingly, which is the cost of finer localization examined in the ablation. Table 5.1 gives the per-block budget, and Fig. 5.2 shows how the 128-bit payload is divided into a 32-bit authentication tag and a 96-bit recovery descriptor. The descriptor in turn consists of 12 quantized DCT coefficients of 8 bits each, and the whole payload is written into the two least-significant bit-planes of the block's 64 pixels.
+
+[[TABLE 5.1]]
+
+[[FIG 5.2]]
+
+Embedding is made safe by a most-significant projection that separates what is signed from what is overwritten.
+
+@@EQ MSB(a) = a AND 0xFC
+
+The projection zeroes the two least-significant bits of a pixel value and is idempotent, so applying it twice changes nothing. Embedding writes only to those two bit-planes, so it cannot alter the content that the tag was computed over. That is exactly what makes the scheme single-pass: no embed-and-verify loop is needed, and the tag computed before embedding is the tag that verification will recompute afterwards.
+
+The block map decides which block carries which descriptor. It must satisfy three requirements.
+
+@@EQ (R1) m bijective;   (R2) ||c(i) - c(m(i))||_2 >= d_min;   (R3) m is a single K-cycle
+
+The separation is d_min = (1/4) min(M, N). Requirement R3 is obtained by construction rather than by rejection sampling. A cryptographically seeded Fisher-Yates shuffle produces a cycle order of the K blocks, and m is read off that order directly, sending each block to its successor in the cycle. Fixed points and mutual pairs are therefore impossible, and bijectivity holds without a check. A repair pass then enforces R2 by exchanging offending positions, after which all three properties are verified. Fig. 5.3 illustrates the result.
+
+[[FIG 5.3]]
+
+The descriptor is a low-frequency summary of the block's projected content. For Variant A it is the quantized leading portion of the transform.
+
+@@EQ q_hat(i,l) = clip( round( C_i(sigma(l)) / Delta_l ), -128, 127 ),  l = 1,...,12
+
+Here C_i is the orthonormal two-dimensional DCT of the level-shifted projected block, sigma(l) is the zig-zag index and Delta_l the step size of band l. No retained coefficient can clip. By the Cauchy-Schwarz inequality the magnitude of any coefficient is at most 1024 at B = 8, and every step size is large enough that the quantized magnitude stays inside the signed 8-bit range. Variant C uses the same 96-bit layout with an adaptive, rate-distortion-fitted allocation.
+
+Authentication binds the block's content, its position and the descriptor it carries.
+
+@@EQ a_i = Trunc_32( HMAC-SHA256_Ks( ID || i || MSB(b_i) || r_{m^-1(i)} ) )
+
+The primitive is HMAC over SHA-256 [20], truncated to 32 bits. Each bound field answers a specific attack. MSB(b_i) makes the tag independent of the bits embedding will write, so the tag survives its own insertion. The block index i and the identifier ID defeat the collage attack of [7], in which blocks from different positions or different images are recombined because each block is authenticated in isolation. The last field, r_{m^-1(i)}, is the descriptor this block physically carries on behalf of another block; binding it prevents an attacker from replacing recovery data without detection, since any substituted descriptor changes the recomputed tag.
+
+Recovery quality is summarized by the recoverability rate. With T the flagged set and U the subset of T whose partner is itself flagged,
+
+@@EQ rho = 1 - |U| / |T|,   U = { i in T : m(i) in T }
+
+A flagged block is unrecoverable exactly when the block that carries its descriptor is also flagged. If the position of m(i) were independent of the tampered region, the probability of that event would equal the tampered fraction alpha, giving the structural bound E[rho] approximately 1 - alpha. The bound is a baseline of the one-to-one allocation, not a guarantee, and the evaluation chapter compares it with measured values.
+
+Finally, the cost of the scheme is linear in the image size.
+
+@@EQ T(M,N) = O(MN)
+
+Embedding and verification each need one keyed hash and one BxB transform per block, plus O(K) work to build the mapping. There is no iteration, no optimization and no training, and no NP-hard sub-problem arises anywhere in the pipeline, so the problem is of class P. Memory use is likewise proportional to the image, because blocks are processed independently once the map is built, and the only quantity that must be held for the whole image is the permutation itself.
+
+@@SEC 5.3 Data Flow Diagrams
+
+The data flow diagrams decompose the system from its external boundary down to the operations of the detector and the recovery engine. Each level refines exactly one level above it, and the same names are used throughout, so a flow that appears at the boundary can be traced to the operation that consumes it. Throughout, the secret key is treated as an input supplied by the user at the time of each operation and not as data owned by the pipeline.
+
+@@SUB 5.3.1 Level 0 (Context Diagram)
+
+Fig. 5.4 treats the whole system as one process, the Watermark-Guided Tamper Localization and Recovery System. Two external entities interact with it. The Content Owner supplies an original image and a secret key and receives the watermarked image. The Verifier supplies a received image and a secret key and receives a tamper map, a repaired image and an audit record. A single data store, D1 Protected Image Library, holds the protected images.
+
+[[FIG 5.4]]
+
+@@SUB 5.3.2 Level 1
+
+Fig. 5.5 opens the single process into four. Process 1.0 Embed Watermark produces the protected image; 2.0 Store and Distribute places it in D1 and releases copies; 3.0 Verify and Localize examines a received image; and 4.0 Recover Content repairs it. The key and the image identifier enter processes 1.0, 3.0 and 4.0. The block mask passes from 3.0 to 4.0, and the audit record leaves 3.0 toward the Verifier.
+
+[[FIG 5.5]]
+
+@@SUB 5.3.3 Level 2
+
+Fig. 5.6 decomposes processes 3.0 and 4.0. Process 3.0 contains 3.1 Extract LSB Payload, 3.2 Recompute Tags, 3.3 Compare and Build Block Mask, and 3.4 Refine and Expand to Pixel Mask. Tags are compared per channel and combined by an OR rule: a tamper touching any single channel flags the block. The refinement pass then examines each unflagged block whose neighbors are mostly flagged. Its threshold scales with the number of valid neighbors, so border and corner blocks, which have fewer neighbors, are not penalized.
+
+Process 4.0 contains 4.1 Partition Flagged Set, 4.2 Decode Partner Descriptor, 4.3 Write Recovered Pixels and 4.4 Mark Unrecoverable Blocks. The flagged set is first split into blocks whose partner is intact and blocks whose partner is also flagged. The first group is rebuilt from the partner descriptor; the second is marked explicitly, never inpainted and never left in place silently, so a viewer can always distinguish reconstructed content from content that could not be recovered.
+
+[[FIG 5.6]]
+
+@@SEC 5.4 Entity Relationship Diagram
+
+Fig. 5.7 shows the data model. The central entity is PROTECTED_IMAGE, whose primary key is id. Its attributes record the image name, creation time, dimensions, block size, descriptor variant, the key, the image identifier, the protected image bytes, a content hash, the imperceptibility scores, the number of blocks, a soft-deletion timestamp and a flag stating whether the key is stored encrypted. In the implementation this entity is a single SQLite table with indexes on the image shape and on the hash.
+
+Two further entities appear in the diagram. VERIFICATION_EVENT is related to PROTECTED_IMAGE one-to-many, since one protected image may be verified many times. KEY_PROFILE is related many-to-one, since many images may share one key. The diagram marks both as conceptual. The cardinalities follow from how a protected image is used: it is embedded once under one key, but it may be checked repeatedly, by different parties and at different times, and each check would produce an event worth recording in an audited setting.
+
+The distinction needs to be stated plainly. Only PROTECTED_IMAGE is persisted in the current build. The two conceptual entities are drawn because a deployment into an archive or an ingest pipeline would need a record of each verification and a managed store of keys, not because the software provides them. In the present software, verification results are returned to the user and are not stored, and keys are held as an attribute of the image record.
+
+[[FIG 5.7]]
+
+@@SEC 5.5 UML Diagrams
+
+@@SUB 5.5.1 Use Case Diagram
+
+Fig. 5.8 shows three actors. The Content Owner protects images, individually or in batches, browses the library and downloads protected images. The Verifier applies simulated damage, verifies an image, views the per-block audit, repairs the image and exports a report. The Administrator runs the attack demonstration and deletes records. Verify Image includes Extract Payload, and Repair Image extends Verify Image, since repair is only offered after verification has flagged blocks.
+
+[[FIG 5.8]]
+
+@@SUB 5.5.2 Class Diagram
+
+Fig. 5.9 presents the principal classes with their operations and dependencies. PayloadCodec and BlockMap form the foundation. Embedder depends on both to write the payload, and Detector depends on them to read it back, returning a DetectResult. RecoveryEngine consumes that result. TamperHarness, Metrics and ImageIO support evaluation and file handling, and LibraryStore persists records for the web application.
+
+[[FIG 5.9]]
+
+@@SUB 5.5.3 Sequence Diagram
+
+Fig. 5.10 follows one round trip through the web application. The Content Owner submits an image to the Web Server, which calls the Embedder; the Embedder uses PayloadCodec and BlockMap and returns the protected image, which LibraryStore saves. Simulated damage is then applied, and the Detector verifies the damaged image against the key and identifier. The RecoveryEngine repairs the flagged blocks, and the recoverability rate is returned to the user together with the repaired image.
+
+[[FIG 5.10]]
+
+@@SUB 5.5.4 Activity Diagram
+
+Fig. 5.11 shows verification and recovery as an activity flow. For each block the tag is recomputed and a decision node tests whether it matches the stored tag. Matching blocks are accepted as authentic. Mismatching blocks enter the flagged set, and a second decision node tests, for each flagged block, whether its partner is intact. If so, the block is reconstructed from the descriptor; if not, it is marked unrecoverable. The two paths rejoin before the output is assembled.
+
+[[FIG 5.11]]
+
+@@SUB 5.5.5 State Machine Diagram
+
+Fig. 5.12 describes the lifecycle of an image through eight states: Unprotected, Protected, Distributed, Under Verification, Authentic, Tampered, Recovered and Archived. Embedding moves an image from Unprotected to Protected, and release moves it to Distributed. Verification leads either to Authentic, when no block is flagged, or to Tampered. Repair moves a Tampered image to Recovered, and either outcome may end in Archived.
+
+[[FIG 5.12]]
+
+@@SUB 5.5.6 Component Diagram
+
+Fig. 5.13 groups the software into components with provided and required interfaces. The Core Library provides the embedding, detection and recovery interfaces. The Experiment Harness and the Flask Web Application, with its browser user interface, require them, as does the Streamlit Demonstration Interface. The web application also requires the SQLite Library for persistence. The Report and Figure Builders consume the harness output. Because every consumer uses the same core interface, no application has its own copy of the algorithm.
+
+[[FIG 5.13]]
+
+@@SUB 5.5.7 Deployment Diagram
+
+Fig. 5.14 shows a deployment on a single commodity workstation. The workstation hosts the Python runtime with the core library and the Flask server, the local SQLite file and the browser client. A separate offline node, the experiment harness, runs the evaluation and produces the result grid. No server, no accelerator and no network service is required, which matches the scope of a locally controlled custody chain and keeps the system reproducible.
+
+[[FIG 5.14]]

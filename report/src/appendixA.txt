@@ -1,0 +1,62 @@
+@@SEC A.1 Formal System Definition
+
+The scheme is defined as a tuple of eleven elements, over which three functions operate. The tuple is
+
+@@EQ S = { I, Ks, ID, B, K, m, r, a, T, U, F }
+
+where I is the host image, a member of {0,...,255}^(MxN) for each colour channel; Ks is the secret key from which all key material is derived; ID is the image identifier bound into every tag; and B is the block size, 8 in the main configuration. K = (M/B)(N/B) is the number of blocks, and m is the block mapping, a permutation of {0,...,K-1} under which the descriptor of block i is stored in block m(i).
+
+The remaining elements are derived from these. The descriptor set r = { r_i } holds one summary per block, with r_i in {0,1}^96, and the tag set a = { a_i } holds one authentication tag per block, with a_i in {0,1}^32. T is the flagged block set produced by verification, and U = { i in T : m(i) in T } is the subset of T whose descriptors are held in blocks that are themselves flagged, and which therefore cannot be rebuilt. F is the set of functions {embed, detect, recover}, with the following signatures.
+
+* embed: (I, Ks, ID, B) -> (I', m, r, a), where I' differs from I only in its two least-significant bit-planes.
+* detect: (I*, Ks, ID, B) -> T, the flagged set, with a per-block audit record, where I* is the received image.
+* recover: (I*, T, m, Ks, ID) -> (I^, U), the restored image and the unrecoverable set, whose blocks are marked and not filled.
+
+Success is stated in set terms. Let G be the ground-truth tampered block set. The system succeeds on an input when T = G and U is reported alongside the restored image. It fails when T differs from G, or when any block in T was flagged although its recomputed tag verified correctly. The 17 MSB-preserved-miss blocks of the main grid are the measured residual of the first failure mode.
+
+@@SEC A.2 Satisfiability Analysis
+
+The design is treated as a constraint system, and its satisfiability is shown by exhibiting an assignment that meets every constraint, not by assertion. The constraints are as follows.
+
+* C1, capacity: t(B) + d(B) <= 2B^2, where t is the tag length and d the descriptor length. At B = 8 this reads 32 + 96 <= 128.
+* C2, bijectivity: m must be a permutation of {0,...,K-1}.
+* C3, separation: ||c(i) - c(m(i))||_2 >= d_min for all i, where c(i) is the centre of block i and d_min = (1/4) min(M, N).
+* C4, no fixed points and no two-cycles, which is implied by C5.
+* C5, single-cycle structure: m must consist of one K-cycle.
+* C6, single-pass consistency: the tag must be computable before the payload is written and must remain valid after it is written.
+
+A satisfying assignment exists. C1 holds by the budget arithmetic, and holds with equality, so the payload is exactly capacity-tight with no spare bit. C2, C4 and C5 hold by construction, because m is read directly off a cryptographically seeded Fisher-Yates cycle order. No rejection sampling is needed, and the assignment is found in O(K) time.
+
+C6 holds because the tag is computed over MSB(b_i) = b_i AND 0xFC, and embedding writes only the two least-significant bits. The signed quantity is therefore invariant under embedding, and the tag computed before writing is the tag verified afterward.
+
+C3 is the only constraint that the cycle construction does not guarantee. It is enforced by a repair pass over the cycle. That pass is a local heuristic, not a global optimum, which is sufficient here because C3 is a lower bound and not an objective: any assignment that meets the bound is acceptable. The constraint system is therefore satisfiable, and a satisfying assignment is constructed in linear time for every key.
+
+@@SEC A.3 Complexity Classification
+
+Embedding performs, per block, one BxB DCT, one HMAC-SHA256 evaluation and a fixed number of bit operations. Verification performs the same work, and the mapping costs O(K). With K = MN/B^2 blocks, the total running time is
+
+@@EQ T(M, N) = O(MN)
+
+with no iteration, no optimization and no training, and memory is O(MN + K). The decision problem "does block i verify under key Ks" is answered by one deterministic hash computation and one comparison, and it is therefore in P. No NP-hard or NP-complete sub-problem arises anywhere in the pipeline. The measured timings, 473 ms to embed and 197 ms to verify a 512x512 colour image on a single CPU thread, are consistent with this linear classification.
+
+A related problem is combinatorially hard, however, and the report should not hide it. Choosing a descriptor allocation that maximizes expected recoverability over an unknown tamper geometry is equivalent to choosing a permutation that maximizes the expected size of the set of flagged blocks whose partners survive. This is an assignment problem over K! candidate permutations, closely related to quadratic-assignment formulations that are NP-hard in general.
+
+This project does not solve that optimization. It sidesteps it with a constructive permutation that satisfies a separation lower bound, and it reports the resulting recoverability rate as a measurement, without claiming optimality. Reference-sharing and fountain-coded allocations [11], [12] change the structure of this problem rather than solving it, which is why they are listed as future work.
+
+@@SEC A.4 Feasibility Assessment
+
+@@SUB A.4.1 Technical Feasibility
+
+The pipeline is implemented and measured. It runs on a commodity CPU, embedding a 512x512 colour image in 473 ms and verifying it in 197 ms with no GPU, and it uses only standard-library cryptography. The complete evaluation grid, 3,232 rows over 32 images, has already been produced, so every claim in this report rests on measurement and not on projection.
+
+@@SUB A.4.2 Economic Feasibility
+
+No licensed software, GPU, cloud compute or paid dataset is required. The corpus is public and pinned by SHA-256 hash, so it reproduces byte for byte. The direct cost is student time and a commodity workstation, and the software stack is entirely open source.
+
+@@SUB A.4.3 Operational Feasibility
+
+Verification requires only the received image, the key and the image identifier. The operational burden is therefore key management, which is the one genuine operational precondition of the scheme: an adversary holding the key can re-embed, so custody of the key is custody of the evidence.
+
+@@SUB A.4.4 Schedule Feasibility
+
+The experimental work was completed before this report was written, which removes the usual end-of-project measurement risk. The remaining work is the reference-sharing extension and the final submission, neither of which alters the measured baseline reported here.

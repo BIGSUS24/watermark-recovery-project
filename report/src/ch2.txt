@@ -1,0 +1,48 @@
+@@SEC 2.1 Problem Statement
+
+Given a digital image stored in a lossless container and a secret key held by the authenticating party, the problem is to embed authentication and recovery information into the image itself such that (a) any subsequent region-level modification is localized to the block grid without reference to the original image or any external database, (b) the original content of the modified region is approximately restored from information that survived within the same image, and (c) any region that cannot be restored is identified as such rather than reconstructed by inference. The statement fixes what the scheme must deliver, not how the payload is arranged.
+
+Three standing constraints apply. Embedding must be perceptually transparent. Verification must be deterministic and independently recomputable, so any party holding the key can repeat a decision bit for bit. The pipeline must run on a commodity CPU with no trained parameters, which excludes any training set, GPU or random initialization.
+
+Clause (a) removes the original image and any registry from the verification path, since a scheme that needs a reference copy has already assumed what it is trying to establish. Clause (b) keeps the repair information inside the same pixels, so the image is self-contained once it leaves the authenticating party. Together they reject schemes that detect without recovering and schemes that recover from a side channel that can itself be lost or altered.
+
+Clause (c) is the least conventional and the most important for the intended use. A scheme that silently inpaints what it could not recover produces an output in which genuine and invented pixels are indistinguishable. Explicit unrecoverable marking turns a gap in the evidence into a documented gap, and that disclosure, rather than visual quality, keeps the output admissible as forensic material.
+
+@@SEC 2.2 Goal and Objectives
+
+The goal of the project is to build and measure a deterministic, training-free fragile watermarking scheme that localizes tampering at block granularity, restores what it can from within the image, and reports honestly what it cannot. The six objectives below decompose that goal.
+
+* O1: Design a per-block payload that fits entirely within two least-significant bit-planes, so that embedding distortion is analytically bounded, and achieve mean imperceptibility of at least 40 dB PSNR over a standard corpus.
+* O2: Construct a key-seeded block mapping that is provably bijective, free of fixed points and short cycles, and enforces a minimum spatial separation between a block and its recovery partner.
+* O3: Localize region-level tampering at block granularity with block-level recall of 1.0 across four tamper classes and seven tamper ratios.
+* O4: Produce zero false positives on unmodified watermarked images, verified over more than one million independent block verifications.
+* O5: Reconstruct flagged regions from partner-held descriptors, report an explicit recoverability rate, and mark unrecoverable regions rather than fabricating content.
+* O6: Deliver a reproducible evaluation grid and working software, gated by automated checks that must pass before any result is published.
+
+Each objective carries its verification method: PSNR and SSIM over the 32-image corpus for O1, structural verification of the permutation for O2, the localization grid and the null condition for O3 and O4, the recoverability rate against its structural bound for O5, and the automated sanity gate, which must run before any table or figure is emitted, for O6. An objective with a threshold and a procedure can be closed or visibly left open, which an intention such as improving robustness cannot, so Chapter 7 reports against the objectives one for one, and a result that falls short is reported beside its objective and not deferred to a limitations section.
+
+@@SEC 2.3 Statement of Scope
+
+The project covers still images, in grayscale and three-channel color at 8 bits per channel, stored in lossless containers (PNG, BMP and TIFF). Two block sizes are supported, 8 as the main configuration and 4 for an ablation. Of three recovery descriptor variants, A and C form the main grid and B is an ablation. The evaluation applies four tamper classes, namely copy-paste splicing, object removal by inpainting, crop-and-refill, and noise corruption, each at seven tamper ratios and against exact ground-truth masks. The corpus contains 32 images, 8 from the USC-SIPI database [22] and 24 from the Kodak suite [23]. A local web application and a demonstration interface wrap the same pipeline.
+
+The tamper ratios are nominal values, and Table 2.1 lists them beside the ratios actually achieved. Five of the seven match their nominal value within 0.005. The two highest are nominal only: the region generator cannot reliably place one compact region over that much of a frame, so a nominal 0.60 yields an achieved ratio of 0.573 and a nominal 0.70 yields 0.653. Results at those settings are reported against their nominal labels with this qualification, so the highest-ratio rows are not read as more demanding than they were.
+
+[[TABLE 2.1]]
+
+Fig. 2.1 is a qualitative strip of the pipeline end to end: an image is watermarked, tampered, verified so that the affected blocks are localized, and restored, with any block that cannot be rebuilt left visibly marked, as in the quantitative grid.
+
+[[FIG 2.1]]
+
+Several exclusions are equally deliberate. Video and audio are excluded because the block grid, the capacity budget and the ground-truth masks are defined on a single frame. Robustness to lossy re-encoding, resizing, rotation or filtering is excluded because the scheme is fully fragile by design: a watermark that survived such operations would also survive a malicious edit that mimics them. Adversaries holding the secret key are excluded because no active scheme can defend against them. Real-time camera-firmware embedding is an integration task, and competing with learned detectors on accuracy is excluded because the contribution is determinism and auditability.
+
+@@SEC 2.4 Methodologies of Problem Solving and Efficiency Issues
+
+The image is partitioned into non-overlapping blocks. The two-LSB capacity of each block is split into a keyed authentication tag and a compressed recovery descriptor of a spatially distant partner block chosen by a key-seeded permutation (detail in Chapter 5). Verification recomputes each tag and compares it with the stored value, localizing tampering to mismatched blocks. Recovery rebuilds a flagged block from the descriptor held by its surviving partner, and a flagged block whose partner is also flagged is marked unrecoverable.
+
+The scheme is single-pass. The tag covers only the six most-significant bit-planes of the block, so writing the payload into the two least-significant planes cannot invalidate what was signed; a scheme whose authentication data depends on the pixels that carry it must iterate until the two agree. Each block costs one keyed hash [20] and one BxB transform, so the total work is O(MN) for an M by N image, with no training. On a commodity AMD x86-64 CPU, single thread and in Python, embedding a 512x512 three-channel image takes 473 ms and verification takes 197 ms, with no GPU. Memory is bounded by the image plus one permutation of K integers, where K is the number of blocks.
+
+The design makes three efficiency trade-offs. The first is block size against localization precision and payload. Moving from B = 8 to B = 4 raises pixel-level precision from 0.9599 to 0.9794, but in-region recovery PSNR falls from 29.63 dB to 26.78 dB, a loss of 2.85 dB. Per-block payload falls from 128 to 32 bits and the tag halves from 32 to 16 bits, so the per-block false-accept probability rises from 2^-32 to 2^-16, an expected 0.25 false accepts per 512x512 image with 16,384 blocks, reported as a finding rather than hidden.
+
+The second is LSB shifting against LSB replacement. A descriptor-carrying pixel is moved to the nearest value whose low bits already match, giving a mean distortion of approximately 0.5 LSB against approximately 1.5 LSB for replacement, at the cost of a more involved embedding routine. Tag-carrying pixels are never shifted, so the verification value is always written exactly as computed: the descriptor tolerates a small perturbation of its carrier pixel, whereas the tag tolerates none.
+
+The third is one-to-one mapping against reference sharing. A one-to-one mapping, in the manner of the distant-mapping idea of [15], is cheap and analyzable, since the recoverability rate has a simple structural bound, but recovery fails all-or-nothing per block. Reference-sharing [11] and fountain-coded [12] schemes degrade more gracefully and reach higher whole-image reconstruction at high tamper ratios. The project accepts that cost knowingly and names reference sharing as its principal upgrade.

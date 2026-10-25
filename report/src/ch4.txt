@@ -1,0 +1,51 @@
+@@SEC 4.1 Database Requirements
+
+The core scheme is stateless. Verification needs only the received image, the secret key and the image identifier, with no original image, no reference database and no network call. A third party holding the key can therefore repeat any verdict on an isolated machine. Persistence exists only for the local web application, which keeps a library of protected images so that a user can retrieve, re-download and re-verify what was protected earlier. The library is a single SQLite table named protected, held in the file webapp/library.db. Table 4.1 gives its schema.
+
+[[TABLE 4.1]]
+
+Each row records one protected image. The columns name, created_at, height, width, block and variant describe the image and the configuration used to protect it. The image_id column holds the identifier bound into every authentication tag, the png column holds the protected image as a lossless PNG, and sha256 holds its digest. The columns psnr, ssim and blocks record the quality figures measured at protection time and are nullable. Two indexes are declared, idx_shape on (height, width, block) and idx_sha on sha256, which serve lookups by image geometry and by content digest.
+
+One field is security-relevant. The key column stores the secret key beside the image it protects, and the key_encrypted flag, which defaults to zero, records whether that key is stored encrypted. Storing a key beside the asset it protects is acceptable only for a single-user local demonstration, where the person who protects an image and the person who verifies it are the same and the database file never leaves the machine. In any deployment the key would have to move to an external key store, because anyone able to read the database could otherwise re-embed a forged image. This is a limitation of the demonstration application, not of the scheme.
+
+Retention is soft. The deleted_at column is null for a live record and holds a timestamp once the user deletes it, so a record can still be audited after removal. The same design means the stored image bytes persist after deletion, which would be a privacy consideration for any use beyond the demonstration. Nothing else in the system depends on the database, and losing the file loses the library without affecting the verification of any exported image whose key is known.
+
+@@SEC 4.2 Software Requirements (Platform Choice)
+
+The platform was chosen to keep the trust path short and the evaluation reproducible. Python is the implementation language because the scientific stack lives there and because its standard library supplies hashlib and hmac, so the keyed SHA-256 construction [20] is computed with no third-party cryptographic dependency on the trust path. The standard library also supplies struct, which packs the payload bits. The minimum interpreter version is Python 3.10. Keeping the cryptographic path inside the standard library means an auditor has one fewer package to review before trusting a positive detection, which is the property the scheme exists to provide.
+
+NumPy 2.1.2 provides the vectorized block arithmetic on which the per-block cost depends. OpenCV-headless 5.0.0.93 and scikit-image 0.26.0 supply the transforms and the SSIM implementation [21], and Pillow 10.4.0 handles lossless container formats such as PNG, BMP and TIFF without re-encoding. Matplotlib 3.11.1 draws the figures of the evaluation. Each library does one narrow job, and none of them performs any part of the authentication itself.
+
+Flask serves the local web application because it is small enough to audit in full, which matters for a tool that holds secret keys. Streamlit 1.61.1 provides the demonstration interface over the same pipeline. SQLite stores the library of protected images because the persistence requirement is one table on one machine, and it needs no server process. A heavier database would add an attack surface and an operational burden without adding any capability this project uses.
+
+Every dependency version is pinned exactly, so that the evaluation grid reproduces on another machine, in the same way that every corpus file is pinned by SHA-256. No machine-learning framework appears anywhere in the stack, and the scheme has no trained parameters, which is what allows any verdict to be repeated bit for bit. Table 4.2 lists the software requirements with their roles.
+
+[[TABLE 4.2]]
+
+@@SEC 4.3 Hardware Requirements
+
+The scheme needs any commodity x86-64 or ARM CPU and runs on a single thread. No GPU or other accelerator is used at any stage, whether for embedding, verification, recovery or evaluation. Memory is modest and bounded by the image itself plus one permutation of K integers, where K is the number of blocks, which is 4,096 for a 512x512 image at B = 8. Disk is needed only for the corpus and the result grid, and a few gigabytes is sufficient.
+
+Runtimes were measured on a commodity AMD x86-64 CPU, on a single thread, running the Python implementation on a 512x512x3 image. Embedding takes 473 ms and verification takes 197 ms, so verification costs less than half of embedding. The figures come from an interpreted implementation and are reported as measured, not as a limit on what the scheme can achieve. Table 4.3 summarizes the hardware requirements.
+
+[[TABLE 4.3]]
+
+Because there is no accelerator requirement, the scheme can run inside an embedded capture device or a hospital gateway, which is exactly where a learned detector cannot. A learned detector needs a trained model and usually a GPU, neither of which fits in a camera body or a clinical network appliance. A deterministic scheme with a few hundred milliseconds of single-thread work per image fits both. The same property keeps the verifier independent of the embedder: a gateway can check incoming images with the key alone, and an auditor can repeat the check on an ordinary laptop without installing any inference runtime.
+
+@@SEC 4.4 Analysis Models: SDLC Model to be Applied
+
+The project follows an incremental and iterative model, not a waterfall. The reason is empirical. The payload design, the mapping construction and the descriptor variants were each validated against measurement before the next increment was built, and two defects found during adversarial testing of the web application fed straight back into the core library. Seven increments were delivered in sequence, each adding one capability to a pipeline that already ran end to end.
+
+* Core payload and tag: key derivation, bit budget, MSB projection, the keyed tag and the descriptor encoding.
+* Block mapping: the key-seeded single-cycle permutation with minimum-separation repair.
+* Embedding and detection: LSB packing with shifting, and tag recomputation with block localization.
+* Recovery: rebuilding flagged blocks from surviving partners and reporting the recoverability rate.
+* Tamper harness and metrics: four tamper classes with exact ground-truth masks.
+* Full grid and automated gate: the complete experiment and the sanity checks on its output.
+* Applications: the Flask web application and the Streamlit demonstration interface.
+
+Every increment ends in a runnable end-to-end test, and no increment is considered complete until the sanity gate runs clean on the results it produces. This rule is what makes the loop iterative in practice. A finding from the harness or the gate returns to the earlier increment that caused it, which is then corrected and re-verified before work moves forward. Fig. 4.1 shows the model as applied here.
+
+[[FIG 4.1]]
+
+A waterfall sequence from requirements to validation would have served this project badly. It would have discovered the tamper coincidence behavior only at the end, when the mapping design could no longer be changed. Under the incremental model that behavior appeared while the mapping and recovery increments were still open, which is why the minimum-separation repair pass and the disclosure of the recoverability rate are part of the design and not afterthoughts.

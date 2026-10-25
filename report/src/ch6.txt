@@ -1,0 +1,35 @@
+@@SEC 6.1 Advantages
+
+The advantage that matters most is auditability. Every positive detection reduces to a single recomputed keyed hash comparison: the verifier extracts the stored 32-bit tag from a block's two least-significant bit-planes, recomputes HMAC-SHA256 [20] over its six most-significant bit-planes, the image identifier, the block index and the partner block's descriptor, and compares the two. Any third party holding the key can repeat that bit for bit, with no training data, accelerator or run-to-run variance, which an evidentiary application requires and a learned detector, whose decision is a score from a trained network [17], cannot offer.
+
+Determinism extends to the whole evaluation. Embedding, verification and recovery contain no iteration, optimization or random initialization beyond the key-seeded permutation, so the 3,232-row grid reproduces exactly on the same pinned corpus. At one keyed hash and one block transform per block, the scheme is in problem class P with O(MN) cost. A disagreement between two verifiers can therefore only come from a different key, a different image or a defect, never from chance. The null-condition result is likewise reproducible across five independent keys, two descriptor variants and thirty-two images, and the corpus is pinned by SHA-256 so an examiner can rebuild it exactly.
+
+Secondary advantages are listed below.
+
+* Self-containment: verification needs only the received image, the key and the image identifier.
+* No accelerator: 473 ms to embed and 197 ms to verify a 512x512 colour image on a commodity single-thread CPU.
+* Measured imperceptibility: mean PSNR of 45.479 dB for Variant A and 45.492 dB for Variant C, with a minimum SSIM of 0.97831 over the whole B = 8 set.
+* Exact block-granularity localization: block-level recall of 1.0000 for three tamper classes and 0.99998 for inpainting, with no false-positive block in 1,802,240 null-condition verifications.
+* Honest recovery: regions whose partner block was also destroyed are marked unrecoverable, not filled with fabricated content.
+* Analytic predictability: the recoverability rate has a closed-form structural bound, 1 - alpha, against which every measurement can be checked.
+
+@@SEC 6.2 Limitations
+
+Each limitation is classed as structural, following from this scheme's design choices, or as an engineering gap, closable within the same design, and names where Chapter 7 proposes a remedy.
+
+* Full fragility is structural: any lossy re-encode, resize or filter destroys the watermark, so only images inside a lossless custody chain are protected. Section 7.3 proposes a semi-fragile mode tolerant of benign JPEG re-encoding.
+* One-to-one backup allocation is structural and fails all-or-nothing per block, whereas reference-sharing [11] and fountain-coded [12] schemes degrade gracefully and reach far higher whole-image reconstruction at high tamper ratios. Section 7.3 names reference sharing as the highest-value upgrade.
+* Recovery is a structural low-frequency approximation from 12 DCT coefficients, not the original block. Section 7.3 addresses this through the same allocation change, which raises coverage.
+* Pixel-level precision is capped by block quantization at 0.9599 for B = 8, a structural limit that cannot improve without a finer grid. Section 7.3 proposes hierarchical grids.
+* The two highest tamper ratios are an engineering gap: the region generator cannot reliably place one compact region over 60 to 70 percent of a frame, so they are nominal only, at achieved values of 0.573 and 0.653. No scheme change is needed, and Chapter 7 proposes none.
+* At B = 4 the tag halves to 16 bits, a structural trade-off raising the per-block false-accept probability from 2^-32 to 2^-16, about 0.25 expected false accepts per 512x512 image. Section 7.3 proposes finer grids avoiding the full tag cost.
+* Security rests entirely on key secrecy, which is structural: an adversary holding the key can re-embed a forged image. Section 7.3 proposes a formal security proof of the keyed construction.
+* Capacity is fixed and structural: the two LSB planes of a 512x512 colour image hold 1,572,864 bits, or 192 KB. Section 7.3 proposes hierarchical grids to spend it more efficiently.
+
+@@SEC 6.3 Applications
+
+The scheme fits applications in which an image is captured once, stored losslessly and may later be challenged. A forensic evidence archive is the clearest case: the keyed tag makes every stored image a self-verifying record, and the per-block audit trail shows which blocks failed. Media authentication at ingest uses the same property, with an organization marking an image as it enters its asset system and verifying it at each reuse. Both depend on determinism, since a result must be repeatable by a party who did not run the original check.
+
+Medical imaging integrity in a picture archiving and communication system (PACS) fits because lossless containers are already the norm for diagnostic images and localization says which region of a scan was altered. Legal and official document scans fit because a scan is produced once under controlled conditions, and a tamper that changes a figure or a signature is localized and, where the partner block survives, partly reconstructed. Insurance claim verification benefits from needing no accelerator, since a claims office can verify photographs on ordinary hardware.
+
+Self-authenticating camera or scanner firmware is the most direct deployment, because embedding at capture removes any gap between acquisition and protection and the firmware carries no trained parameters to maintain or certify. All six domains share the precondition that makes an active scheme viable: an acquisition pipeline under institutional control. An image found on the open internet cannot be protected retroactively, because the watermark must be present before the tampering occurs.

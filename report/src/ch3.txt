@@ -1,0 +1,46 @@
+@@SEC 3.1 Project Estimates
+
+The project is a research-and-implementation effort. Its principal deliverable is a working codebase together with a measured evaluation of that codebase, and a deliverable of this kind can be counted in source lines. For that reason the estimate reported here is a basic COCOMO calculation over the code as built, in place of a function-point count made speculatively before the work began. The estimate is therefore retrospective by construction, and it is offered as a consistency check on the effort invested, not as a prediction. Counting only non-comment, non-blank lines of Python, the codebase measures 9,929 lines across 24 modules, which is 9.929 KLOC. Table 3.1 groups these lines by module role.
+
+[[TABLE 3.1]]
+
+The model applied is basic COCOMO in organic mode. Organic mode is the correct choice because the team is small, the application domain is well understood, the requirements are stable, and the project carries no hard real-time or rigid interface constraints. With size S in KLOC, effort E in person-months and development time D in months, the constants a = 2.4, b = 1.05, c = 2.5 and d = 0.38 give the following two relations.
+
+@@EQ E = a x S^b
+@@EQ D = c x E^d
+
+[[TABLE 3.2]]
+
+Substituting the measured size, the effort is E = 2.4 x (9.929)^1.05 = 26.73 person-months, and the development time is D = 2.5 x (26.73)^0.38 = 8.71 months. Dividing effort by time gives an average staffing of 26.73 / 8.71 = 3.07, that is, approximately 3 full-time engineers. Dividing the measured size by the effort gives a productivity of 9,929 / 26.73 = 371 lines per person-month. Table 3.2 collects these figures.
+
+The estimate has to be reconciled with the team that actually exists. The project is executed by a four-student group working part-time alongside coursework across two semesters. An effort of 26.73 person-months over 8.71 months implies about three people working full time, whereas four students each give only a fraction of their week to the project. These facts are consistent with the organic-mode estimate once part-time availability is accounted for. COCOMO was calibrated on professional projects, so it is used here as an order-of-magnitude check and not as a precise measure of student effort.
+
+The remaining cost picture is non-monetary. No licensed software is used, because every dependency is open source. No GPU is required, no cloud compute is rented and no paid dataset is purchased, since the corpus comes from the freely available USC-SIPI [22] and Kodak [23] collections. The direct project cost is therefore effectively the cost of student time and a commodity workstation.
+
+@@SEC 3.2 Risk Management with respect to NP-Hard Analysis
+
+The risk picture depends on the complexity class of the problem, so that question is settled first. Embedding and verification each perform one keyed hash and one BxB transform per block, plus O(K) work to build and apply the block mapping, where K is the number of blocks. The total is O(MN) time for an M x N image, with no iteration, no optimization and no training. The problem solved here is therefore of class P, and no NP-hard sub-problem arises anywhere in the pipeline. The full argument is given in Appendix A.
+
+One nuance deserves honest statement. Choosing an optimal descriptor allocation, meaning the assignment of backup descriptors to host blocks that maximizes expected recoverability under arbitrary tamper geometry, is a combinatorial assignment problem, and this work does not solve it optimally. The project sidesteps it with a constructive key-seeded permutation that satisfies the separation constraint by construction. The absence of an intractable core removes the single largest schedule risk that a research project can carry, because no part of the work depends on a search whose runtime cannot be bounded.
+
+The remaining risks are ordinary engineering and research risks. Table 3.3 records them as a register giving the category, probability, impact and mitigation of each. The ratings are judgments, not measurements. Three of the risks either materialized or came close, and they are discussed in turn below.
+
+[[TABLE 3.3]]
+
+The first is tamper coincidence. A flagged block can be rebuilt only if its partner survives, so when the tampered region covers both a block and the partner that carries its descriptor, that descriptor is lost. The limit is structural, with expected recoverability near 1 - alpha, and no implementation effort can remove it. The minimum-separation mapping, with d_min = 0.25 x min(M,N), makes it unlikely that one compact region covers both. The recoverability rate rho is also disclosed with every result: it runs from 0.9590 at a nominal ratio of 0.10 to 0.3579 at 0.70.
+
+The second is the MSB-preserved-miss block. The tag binds only the six most-significant bit-planes, so a modification that leaves those planes unchanged escapes detection. The design analysis predicted this residual and measurement then confirmed it: 17 blocks across the main grid were missed, all under inpainting, which lowers recall for that class to 0.99998. The sanity gate reports it as one of its two soft warnings, and the project documents it instead of hiding it.
+
+The third is result drift between the prose of the report and the measured grid, in which a number is copied once, the experiment is rerun and the two then disagree. The mitigation is mechanical. Every table is generated from the result file output/runs.csv, and no table or figure is emitted unless the automated gate runs, with 25 of 27 checks passing.
+
+@@SEC 3.3 Project Schedule
+
+The work is organized as ten phases. Phases 1 to 6 and phase 8 are complete. Phase 7, paper preparation and internal review, is in progress. Phase 9, the reference-sharing extension, and phase 10, the final report, demonstration and viva, are planned. The sequence is not strictly linear, since phase 8 was completed while phase 7 remains open and the two do not depend on one another. Table 3.4 lists each phase with its activity, deliverable and status.
+
+[[TABLE 3.4]]
+
+Fig. 3.1 presents the same schedule as a Gantt chart, which makes the overlap between phases visible and shows the remaining work concentrated at the end of the plan. The schedule is deliberately front-loaded. The full experimental grid was completed before the report was written, so every claim in Chapter 7 was measured before it was described, not after. This ordering avoids a familiar failure of student projects, in which the text is written first and the experiments are then bent to fit it.
+
+[[FIG 3.1]]
+
+Phase 9 follows directly from the central finding of the evaluation, that mapping coverage and not descriptor fidelity limits recovery quality. It is planned and not yet started, and its absence does not weaken any measured result in this report. Phase 10 depends on the completion of phase 7, because the demonstration and the final report reuse the tables and figures that phase produces from the result file.

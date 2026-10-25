@@ -1,0 +1,67 @@
+@@SEC 7.1 Results Obtained to Date
+
+The evaluation grid holds 3,232 rows in output/runs.csv. The main grid contributes 1,792 rows: 32 images, four tamper classes, seven nominal tamper ratios from 0.10 to 0.70, and two descriptor variants, A and C, at B = 8. The null condition contributes 320 rows (32 images, two variants, five keys), and the remaining 1,120 rows are ablations covering B = 4 and Variant B. The 32 colour images, 8 from USC-SIPI [22] and 24 from the Kodak suite [23], are pinned by SHA-256. An automated gate passes 25 of 27 checks; the two soft warnings are the inpainting MSB-preserved-miss category and three rows with slightly elevated coincidentally unchanged pixels. Every table and figure is generated from the result file after the gate has run, so the report cannot drift from the measurement.
+
+@@SUB 7.1.1 Imperceptibility
+
+Variant A reaches a mean PSNR of 45.479 dB and a mean SSIM [21] of 0.98847 over the 32-image corpus, and Variant C reaches 45.492 dB and 0.98841. The minimum SSIM over the whole B = 8 set is 0.97831, so no image is visibly degraded. The weakest named image is Tiffany at 44.07 dB for Variant A, against 45.64 to 45.73 dB for the other named images. Table 7.1 summarizes these figures.
+
+[[TABLE 7.1]]
+
+AuSR1 publishes a watermarked-image PSNR of 45.57 dB [13]; the measured 45.479 dB for Variant A is within 0.1 dB of it. LSB shifting, which moves a descriptor-carrying pixel to the nearest value whose low bits already match, closes most of the gap to plain replacement, cutting mean distortion from about 1.5 LSB to about 0.5 LSB.
+
+@@SUB 7.1.2 Localization
+
+Block-level recall is 1.0000 for copy-paste splicing, crop-and-refill and noise corruption, and 0.99998 for object removal by inpainting. Across the 1,792 main-grid trials, 17 blocks were missed because the inpainting preserved their most-significant bit-planes, the predicted residual of the descriptor-binding design and not an unexplained failure. Pixel-level precision is 0.9599 as a main-grid mean and rises with tamper ratio: 0.9248, 0.9481, 0.9581, 0.9643, 0.9701, 0.9740 and 0.9797 at ratios 0.10 through 0.70. The shortfall from 1.0 is the 8x8 block-quantization penalty, which shrinks as regions grow. Neighborhood refinement flagged only 2 blocks out of 10,092,544 verified.
+
+Block-level precision is deliberately not headlined: a block counts as tampered if the region covers any of its pixels, so a block-level false positive is structurally impossible and the metric reads 1.000 regardless of detector quality. The pixel-level figure is the honest measure of how tightly the flagged area follows the true region.
+
+The null condition tests unmodified watermarked images. Across 320 rows, 1,802,240 independent block verifications produced 0 false-positive blocks, a false-positive rate of 0.000000 with a rule-of-three 95% upper bound of 1.66e-6. This is a determinism and implementation-consistency check across images, variants and keys, not a measurement of the 2^-32 cryptographic false-accept probability, which no experiment of this size could resolve. Table 7.3 gives these figures.
+
+[[TABLE 7.3]]
+
+@@SUB 7.1.3 Recovery
+
+The recoverability rate rho is 0.9590, 0.8584, 0.7479, 0.6371, 0.5335, 0.4437 and 0.3579 at nominal ratios 0.10 to 0.70, against structural bounds of 0.90, 0.80, 0.70, 0.60, 0.50, 0.40 and 0.30. It is monotone, near-linear and 3 to 6 percentage points above its own bound at every ratio, not collapsing toward it. The main-grid mean is 0.6482. Table 7.2 lists the values, and Fig. 7.1 plots the measured curve with error bars against the dashed 1 - alpha bound and the shaded margin.
+
+[[TABLE 7.2]]
+
+[[FIG 7.1]]
+
+By contrast, in-region PSNR stays essentially flat across ratios, at 28.49 dB for Variant A and 31.13 dB for Variant C, with a main-grid mean of 29.81 dB, while whole-image PSNR under the unmarked convention falls with coverage to a Variant A mean of 21.40 dB. A recovered block is about as good at high tamper ratios as at low ones; what changes is how many can be recovered, so mapping coverage, not descriptor fidelity, is the dominant constraint, pointing directly at reference sharing as the highest-value upgrade. Fig. 7.2 plots in-region PSNR for Variants A and C and whole-image PSNR against tamper ratio.
+
+[[FIG 7.2]]
+
+Fig. 7.3 is a qualitative strip from original to recovered image. The watermarked image is indistinguishable from the original, the mask follows the tampered region within a block-wide margin, and recovered content is a smooth low-frequency approximation, with fine texture lost and unrecoverable blocks marked, not invented.
+
+[[FIG 7.3]]
+
+@@SUB 7.1.4 Comparison and Ablation
+
+Table 7.4 compares the scheme with published work, with figures cited and not re-implemented, so the comparison is indicative only. The entry for this project uses the whole-image unmarked convention, 17.39 dB at 50% tamper for Variant A, the only quantity comparable to the published numbers; the default output, which marks unrecoverable regions rather than fabricating content, gives 12.40 dB at 50% tamper, about 5 dB lower. Fountain-coded reconstruction [12] at 37 dB and the multi-feature scheme of Wu et al. [18] at above 30 dB are well ahead of this scheme on recovery; the contribution here is auditability, not reconstruction.
+
+[[TABLE 7.4]]
+
+The block-size ablation, in Table 7.5, shows the cost of a finer grid. Reducing B from 8 to 4 raises pixel-level precision from 0.9599 to 0.9794 but lowers in-region PSNR from 29.63 dB to 26.78 dB, a loss of 2.85 dB. Payload falls from 128 to 32 bits per block and the tag from 32 to 16 bits, so the per-block false-accept probability rises from 2^-32 to 2^-16, an expected 0.25 false accepts per 512x512 image with 16,384 blocks, a finding and not a defect to be hidden.
+
+[[TABLE 7.5]]
+
+Against the six objectives of Section 2.2, O1, O2, O3, O4 and O6 are met by the measurements above. O5, recovery, is met with the rate disclosed: rho is reported at every ratio, the unrecoverable fraction is marked, and the structural limitation relative to reference-sharing schemes is stated beside the result.
+
+@@SEC 7.2 Conclusions
+
+This project built a deterministic, training-free self-embedding fragile watermarking scheme. Each 8x8 block carries, in its two least-significant bit-planes, a 32-bit keyed HMAC-SHA256 tag and a 96-bit descriptor of a spatially distant partner block chosen by a key-seeded single-cycle permutation. The implementation is 9,929 lines of Python across 24 modules, plus a local web application and demonstration interface, with no machine-learning framework or trained parameter.
+
+Over 3,232 rows and 32 images, imperceptibility is 45.479 dB for Variant A, block-level recall is 1.0000 for three of four tamper classes, the null condition shows no false-positive block in 1,802,240 verifications, and recoverability is 3 to 6 percentage points above its structural bound. In-region recovery quality, at 29.81 dB, is modest, and whole-image figures are well below fountain-coded and reference-sharing schemes.
+
+The claim is narrower than accuracy: the design offers accountability, since every verification decision is one recomputed keyed hash comparison that any third party holding the key can reproduce bit for bit. The distant-mapping idea is not claimed as new, nor is superiority over learned proactive watermarking. The scheme is fully fragile, protecting images only inside a lossless custody chain; its one-to-one backup allocation fails all-or-nothing per block, capping whole-image reconstruction at high tamper ratios; and security rests on key secrecy. Section 7.3 addresses these limits.
+
+@@SEC 7.3 Future Work
+
+Five directions follow from the measurements and Section 6.2.
+
+* Reference sharing or fountain-coded descriptor allocation is the highest-value upgrade: mapping coverage, not descriptor fidelity, limits recovery quality (Section 7.1.3), so spreading each descriptor across several blocks addresses it directly.
+* A semi-fragile mode tolerant of benign JPEG re-encoding would extend the scheme beyond a strictly lossless custody chain, its largest deployment restriction.
+* Finer or hierarchical localization grids that do not pay the full tag cost would raise pixel-level precision beyond 0.9599 without the halved tag and false-accept penalty of B = 4.
+* Integration into capture firmware and PACS or DICOM ingest would test the scheme where the applications of Section 6.3 apply and measure embedding cost on constrained hardware.
+* A formal security proof of the keyed construction would replace the present argument from the standard properties of HMAC-SHA256 [20] with a stated reduction covering every bound field.

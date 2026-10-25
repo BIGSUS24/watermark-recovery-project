@@ -1,0 +1,77 @@
+[1] J. Fridrich and M. Goljan, "Protection of digital images using self-embedding," in Proc. Symp. Content Security and Data Hiding in Digital Media, Newark, NJ, USA, May 1999.
+Summary: The paper introduces self-embedding: a reduced-quality version of the image is hidden in the image's own least significant bits, so that a cropped or replaced region can be approximately restored from the surviving area. It is the origin of the recovery line of work, and this project inherits the idea that an image carries its own repair data.
+
+[2] P. Zhou, X. Han, V. I. Morariu, and L. S. Davis, "Learning rich features for image manipulation detection," in Proc. IEEE/CVF Conf. Computer Vision and Pattern Recognition (CVPR), Salt Lake City, UT, USA, Jun. 2018.
+Summary: A two-stream network combines an RGB stream, which looks for visible tampering artifacts, with a noise stream, which looks for inconsistencies in local noise statistics, to detect and localize manipulated regions. It represents passive detection, which analyzes the received image alone. This project cites it as the contrast case: detection without any embedded reference, and without any recovery.
+
+[3] Y. Wu, W. AbdAlmageed, and P. Natarajan, "ManTra-Net: Manipulation tracing network for detection and localization of image forgeries with anomalous features," in Proc. IEEE/CVF Conf. Computer Vision and Pattern Recognition (CVPR), Long Beach, CA, USA, Jun. 2019.
+Summary: ManTra-Net learns features that describe how locally anomalous each pixel is relative to its surroundings, which lets one network handle many forgery types and localize them at pixel level. Like [2], it is a passive detector that cannot restore content. It is cited to show why a tamper-localization result alone does not answer the recovery requirement of this project.
+
+[4] P. W. Wong and N. Memon, "Secret and public key image watermarking schemes for image authentication and ownership verification," IEEE Trans. Image Process., vol. 10, no. 10, pp. 1593-1601, Oct. 2001.
+Summary: The scheme computes a keyed cryptographic hash over each image block, together with block-specific information, and hides the result in the least significant bits of that same block, giving block-level localization of tampering. It established the block-wise fragile authentication template. This project follows the block-and-tag structure, and its tag construction answers the weaknesses later shown against it.
+
+[5] C. Rey and J.-L. Dugelay, "A survey of watermarking algorithms for image authentication," EURASIP J. Appl. Signal Process., vol. 2002, no. 6, pp. 613-621, 2002.
+Summary: The survey classifies authentication watermarks by what they tolerate, separating fragile schemes that flag any change from semi-fragile schemes that survive acceptable processing such as compression, and it lists the requirements of localization and security. It supplied the taxonomy used to place this project among fragile schemes, and to state why compression tolerance is deliberately not claimed.
+
+[6] I. J. Cox, J. Kilian, F. T. Leighton, and T. Shamoon, "Secure spread spectrum watermarking for multimedia," IEEE Trans. Image Process., vol. 6, no. 12, pp. 1673-1687, Dec. 1997.
+Summary: A watermark is spread across the perceptually significant frequency components of the image, which makes it hard to remove without visibly damaging the content. This is the robust watermarking tradition, designed to survive processing for ownership claims. It is cited as the opposite design goal: this project wants a mark that breaks on any alteration, not one that persists.
+
+[7] M. Holliman and N. Memon, "Counterfeiting attacks on oblivious block-wise independent invisible watermarking schemes," IEEE Trans. Image Process., vol. 9, no. 3, pp. 432-441, Mar. 2000.
+Summary: When each block is marked independently of its position and of the rest of the image, an attacker holding several marked images can assemble a forgery from valid blocks (the vector quantization or collage attack). The paper shows that independence between blocks is the vulnerability. It forces the tag in this project to bind the block index and an image identifier.
+
+[8] C.-Y. Lin and S.-F. Chang, "Semi-fragile watermarking for authenticating JPEG visual content," in Proc. SPIE 3971, Security and Watermarking of Multimedia Contents II, 2000, pp. 140-151.
+Summary: Authentication bits are derived from relationships between quantized DCT coefficients that survive JPEG recompression, so the mark rejects malicious edits while accepting lossy compression. It is the standard example of semi-fragile design. This project sits on the strict side of that trade: it reports compression as a tamper, and does not claim the tolerance this paper achieves.
+
+[9] J. Fridrich, "Security of fragile authentication watermarks with localization," in Proc. SPIE 4675, Security and Watermarking of Multimedia Contents IV, San Jose, CA, USA, Jan. 2002, pp. 691-700.
+Summary: The paper analyzes fragile localizing schemes and shows that the finer the localization, the more easily block-level independence can be exploited, so small blocks and strong security pull against each other. It argues for dependence between blocks and across the image. This project cites it for the security argument behind tying each tag to other blocks and to an image identifier.
+
+[10] P.-L. Lin, C.-K. Hsieh, and P.-W. Huang, "A hierarchical digital watermarking method for image tamper detection and recovery," Pattern Recognit., vol. 38, no. 12, pp. 2519-2529, Dec. 2005.
+Summary: Detection is arranged in levels, from larger regions down to small blocks, so that a block missed at one level can be caught at the next, and recovery data for each block is stored in a different, mapped block. The hierarchy reduces false negatives. This project cites it as an early combined detection-and-recovery scheme and as a source of the mapped-storage practice.
+
+[11] X. Zhang, S. Wang, Z. Qian, and G. Feng, "Reference sharing mechanism for watermark self-embedding," IEEE Trans. Image Process., vol. 20, no. 2, pp. 485-495, Feb. 2011.
+Summary: Reference data are shared among blocks through a redundancy-style mechanism, so recovery degrades gradually as the tampered fraction grows, and quality stays acceptable when the damage is large. It is one of the two works that define the graceful-degradation benchmark. This project does not yet meet that benchmark, and the report states the gap plainly.
+
+[12] P. Korus and A. Dziech, "Efficient method for content reconstruction with self-embedding," IEEE Trans. Image Process., vol. 22, no. 3, pp. 1134-1147, Mar. 2013.
+Summary: Reference information is split into several shares and embedded so that content can be reconstructed from the pieces that survive, and quality falls smoothly as more of the image is destroyed. Together with [11], it sets the graceful-degradation benchmark for self-embedding. This project falls short of that benchmark, and the report treats it as the main direction for future work.
+
+[13] A. Aminuddin and F. Ernawan, "AuSR1: Authentication and self-recovery using a new image inpainting technique with LSB shifting in fragile image watermarking," J. King Saud Univ. - Comput. Inf. Sci., 2022.
+Summary: The paper stores recovery information with a shift of the least significant bits, which gives a larger payload at tolerable distortion, and it fills unrecovered pixels by image inpainting. It is the first of the three AuSR schemes. This project borrows the LSB-shifting idea, and credits it to this paper.
+
+[14] A. Aminuddin and F. Ernawan, "AuSR2: Image watermarking technique for authentication and self-recovery with image texture preservation," Comput. Electr. Eng., vol. 102, art. 108207, 2022.
+Summary: The second AuSR scheme adjusts the embedding so that image texture is preserved, because heavy bit modification shows up most in textured areas. It is a refinement of how watermark bits are placed, not a new recovery principle. This project cites it as the closest reference for the imperceptibility side of its design.
+
+[15] A. Aminuddin and F. Ernawan, "AuSR3: A new block mapping technique for image authentication and self-recovery to avoid the tamper coincidence problem," J. King Saud Univ. - Comput. Inf. Sci., vol. 35, no. 9, art. 101755, 2023.
+Summary: Tamper coincidence arises when a block and the block holding its recovery data are both altered, so neither can be restored. AuSR3 proposes a block mapping that places the recovery data far from the block it describes. This project credits the distant-mapping principle to this paper and does not claim it.
+
+[16] A. Aminuddin, F. Ernawan, D. Nincarean, A. Amrullah, and D. Ariatmanto, "TCBR and TCBD: Evaluation metrics for tamper coincidence problem in fragile image watermarking," Eng. Sci. Technol. - Int. J., vol. 56, art. 101790, 2024.
+Summary: The paper defines two metrics, TCBR and TCBD, that measure how much a scheme suffers from tamper coincidence, so that mapping designs can be compared on a common scale instead of by example images. This project uses it as the reference point for reporting coincidence behavior, and for stating which parts of that measurement it adopts.
+
+[17] X. Zhang, R. Li, J. Yu, Y. Xu, W. Li, and J. Zhang, "EditGuard: Versatile image watermarking for tamper localization and copyright protection," in Proc. IEEE/CVF Conf. Computer Vision and Pattern Recognition (CVPR), 2024.
+Summary: EditGuard uses a learned encoder and decoder to embed both a localization mark and a copyright message, aimed at edits made by generative models. It marks the move of watermarking toward learned, AI-era settings. This project cites it as the current learned alternative, and keeps to a classical scheme whose behavior can be inspected and verified.
+
+[18] Q. Wu, H. Li, M. Li, and M. Wang, "Multi-feature fragile image watermarking algorithm for tampering blind-detection and content self-recovery," Computers, Materials & Continua, vol. 86, no. 1, 2026.
+Summary: The scheme builds the watermark from several image features and detects tampering blindly, without access to the original, while storing information for content self-recovery. It is among the most recent entries in the line of fragile self-recovery work. This project cites it to show that the problem is still active, and it does not compare against it directly.
+
+[19] X. Zhang and S. Wang, "Fragile watermarking with error-free restoration capability," IEEE Trans. Multimedia, vol. 10, no. 8, pp. 1490-1499, Dec. 2008.
+Summary: The scheme embeds the original values of the pixels it modifies, together with authentication data, so that an untampered image can be restored exactly to its original state after verification. It targets error-free restoration of the cover image, not recovery of tampered content. This project cites it to separate those two meanings of restoration.
+
+[20] National Institute of Standards and Technology, "Secure Hash Standard (SHS)," FIPS Publication 180-4, Aug. 2015.
+Summary: The standard specifies the SHA family of hash functions, including SHA-256, which maps input of any length to a fixed-length digest that is hard to invert or to collide. It is the primitive underneath the keyed tags in this project. The tag construction relies on SHA-256 as specified here, and it does not invent a hash.
+
+[21] Z. Wang, A. C. Bovik, H. R. Sheikh, and E. P. Simoncelli, "Image quality assessment: From error visibility to structural similarity," IEEE Trans. Image Process., vol. 13, no. 4, pp. 600-612, Apr. 2004.
+Summary: The paper proposes the structural similarity index, which compares luminance, contrast and structure between two images and tracks perceived quality better than error energy alone. This project uses SSIM, alongside PSNR, to report how much the embedding changes the image and how good a recovered image is.
+
+[22] University of Southern California, Signal and Image Processing Institute, "The USC-SIPI Image Database." [Online]. Available: https://sipi.usc.edu/database/
+Summary: The database is a long-standing public collection of digitized test images, widely used as a common benchmark in image processing research. It is cited as a dataset source for the evaluation images, so that results can be compared with those in the published literature.
+
+[23] Eastman Kodak Company, "Kodak Lossless True Color Image Suite." [Online]. Available: https://r0k.us/graphics/kodak/
+Summary: The suite is a set of uncompressed color photographs released for use in image compression and processing research, and it is a common benchmark for natural color images. It is cited as the second dataset source for evaluation, so that the test material is not limited to one collection.
+
+[24] Coalition for Content Provenance and Authenticity, "C2PA Technical Specification." [Online]. Available: https://c2pa.org/specifications/
+Summary: The specification defines signed provenance metadata, called content credentials, that is attached to a media file to record its origin and edit history. The credentials sit beside the pixels and can be stripped from the file. This project cites it as the metadata-based alternative, and contrasts it with a mark carried inside the pixels.
+
+[25] "A recent survey of self-embedding fragile watermarking scheme for image authentication with recovery capability," EURASIP J. Image Video Process., 2019.
+Summary: The survey reviews self-embedding fragile schemes that authenticate an image and recover tampered regions, and organizes them by how recovery data are generated, mapped and embedded. It is the broad map of the field. This project cites it for the classification of schemes and for the open problems it identifies.
+
+[26] "Security analysis of a self-embedding fragile image watermark scheme," arXiv:1812.11735, 2018.
+Summary: The paper examines a published self-embedding fragile scheme from an attacker's side and shows that its security claims do not survive analysis. It illustrates that recovery schemes are attacked in practice, not just in theory. This project cites it as supporting evidence for treating the security of the tag construction as a design requirement.
