@@ -11,6 +11,7 @@ standard USC-SIPI plate the long paper uses.
 
     python paper/icip/run_photo.py      # pipeline on the photograph -> figures + JSON
     python paper/icip/assemble.py       # parts/*.tex -> paper/ICIP_Paper.tex -> PDF
+    python paper/icip/build_docx.py     # the same paper as PDF + Word (.docx)
 
 | path | what |
 | --- | --- |
@@ -20,6 +21,7 @@ standard USC-SIPI plate the long paper uses.
 | `parts/` | the section files `assemble.py` stitches together |
 | `../ICIP_Paper.tex` | generated; edit `parts/`, not this |
 | `../../output/paper/ICIP_Paper.pdf` | the compiled paper |
+| `../../output/paper/ICIP_Paper.docx` | the same paper in Word, built by `build_docx.py` on top of `src/build_docs.py` |
 | `../../output/figures/icip_*.{png,pdf}` | its two generated figures |
 
 Every number in the paper comes from `output/runs.csv` (via `report/src/FACTS.md`)
