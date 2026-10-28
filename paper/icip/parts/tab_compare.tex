@@ -1,0 +1,23 @@
+\begin{table}[t]
+\caption{Comparison With Published Self-Embedding Schemes. Figures for Prior Work
+Are as Reported by Their Authors and Were Not Re-Implemented Here}
+\label{tab:compare}
+\centering
+\footnotesize
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Scheme & Block & WM PSNR (dB) & Recovered (dB) \\
+\midrule
+AuSR1 \cite{ausr1}                         & $2\times2$ & 45.57 & 27.64$^{\ast}$ \\
+Wu \emph{et al.} \cite{wu2026multifeature} & ---        & $>41$ & $>30$ \\
+Korus \& Dziech \cite{korus2013efficient}  & ---        & ---   & 37 \\
+This work (Variant A)                      & $8\times8$ & 45.48 & 17.39 \\
+\bottomrule
+\end{tabular}
+\\[2pt]
+\footnotesize Recovered PSNR is whole-image at 50\% tamper, except $^{\ast}$AuSR1,
+which reports its worst case. The value is convention-dependent: the row for this
+work uses the unmarked convention, and the honest marked output is 12.40~dB. This
+work additionally reports block recall 1.0000 and pixel precision 0.9599;
+Wu \emph{et al.} report 0\% FPR and FNR.
+\end{table}

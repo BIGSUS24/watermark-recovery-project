@@ -1,0 +1,10 @@
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.88\textwidth]{architecture.png}
+\caption{Pipeline. Embedding partitions the image, encodes a recovery descriptor
+per block, routes it to a distant partner through the key-seeded map, appends the
+keyed tag, and writes both into the two least-significant bit-planes. Verification
+recomputes the tag, forms the block mask, and recovers each flagged block from the
+descriptor its surviving partner carries.}
+\label{fig:arch}
+\end{figure*}

@@ -1,0 +1,81 @@
+\section{Proposed Scheme}
+\label{sec:method}
+
+\subsection{Notation and Bit Budget}
+\label{ssec:budget}
+Each channel of an $M\times N$ image is processed separately and partitioned into non-overlapping $B\times B$ blocks $b_i$, indexed by $i\in\mathcal{K}=\{0,\dots,K-1\}$ in raster order, with $K=\lfloor M/B\rfloor\lfloor N/B\rfloor$. The two least-significant bit-planes of a block hold
+\begin{equation}
+\mathrm{cap}(B)=2B^{2}\ \text{bits},
+\label{eq:cap}
+\end{equation}
+which is 128~bits per block per channel at $B=8$. This budget splits into a tag of $t$ bits and a recovery descriptor of $d$ bits,
+\begin{equation}
+t=\min\!\left(32,\ \tfrac{\mathrm{cap}}{2}\right),\qquad d=\mathrm{cap}-t,
+\label{eq:split}
+\end{equation}
+giving $t=32$ and $d=96$ at $B=8$.
+
+The tag cannot cover the embedded planes, which change during embedding. The MSB projection
+\begin{equation}
+\mathrm{msb}(a)=a\ \mathrm{AND}\ \mathtt{0xFC}
+\label{eq:msb}
+\end{equation}
+zeroes the two low bits of each pixel $a$, is idempotent, and leaves the six high bit-planes untouched. The tag is therefore a function of $\mathrm{msb}(b_i)$ only, written $\mathrm{MSB}(b_i)$ for a whole block.
+
+\subsection{Key-Seeded Block Mapping}
+\label{ssec:map}
+The scheme stores the recovery descriptor of block $i$ in a spatially distant block $m(i)$, an idea due to \cite{ausr3}; the construction below concerns only key-driven generation. A cryptographically seeded keystream (HMAC-SHA256 in counter mode) drives a Fisher--Yates shuffle of the block indices into an order $\pi=(\pi_0,\dots,\pi_{K-1})$. The map is written directly in cycle notation,
+\begin{equation}
+m(\pi_t)=\pi_{(t+1)\bmod K},\qquad t=0,\dots,K-1.
+\label{eq:cycle}
+\end{equation}
+For every possible $\pi$, $m$ is a bijection and a single cycle of length $K$, so fixed points, mutual two-cycles and short cycles are absent by construction, not by rejection sampling. With $\mathbf{p}_i$ the centroid of block $i$, the map must also satisfy
+\begin{equation}
+\lVert\mathbf{p}_i-\mathbf{p}_{m(i)}\rVert_2\ \ge\ d_{\min}=0.25\,\min(M,N)\quad\forall i.
+\label{eq:dmin}
+\end{equation}
+A repair pass swaps elements of $\pi$, keeping a swap only if it strictly reduces the number of violating cycle edges; any rearrangement of $\pi$ still yields a single cycle by (\ref{eq:cycle}), so bijectivity is preserved. The map is regenerated from the key at verification and never transmitted. The separation (\ref{eq:dmin}) ensures that a localized edit destroying block $i$ does not also destroy its backup.
+
+\subsection{Recovery Descriptor}
+\label{ssec:desc}
+In Variant A, the MSB-projected block is level-shifted by 128 and transformed with an orthonormal 2-D DCT. The first 12 zig-zag coefficients $c_1,\dots,c_{12}$ are retained, each quantized to a signed 8-bit value using the JPEG quality-50 luminance step size $Q_k$ at its position,
+\begin{equation}
+q_k=\mathrm{clip}\!\left(\mathrm{round}(c_k/Q_k),\,-128,\,127\right),
+\label{eq:quant}
+\end{equation}
+so the descriptor occupies $12\times 8=96$~bits exactly, matching $d$ in (\ref{eq:split}). Decoding dequantizes, inverts the transform, and returns the MSB projection. Variant C is a rate--distortion-fitted adaptive alternative with the same 96~bits.
+
+\subsection{Keyed Authentication Tag}
+\label{ssec:tag}
+With secret key $K_s$ and image identifier $ID$, the tag of block $i$ is
+\begin{equation}
+a_i=\mathrm{Trunc}_{32}\!\big(\mathrm{HMAC}_{K_s}(ID\,\Vert\,i\,\Vert\,\mathrm{MSB}(b_i)\,\Vert\,r_{m^{-1}(i)})\big),
+\label{eq:tag}
+\end{equation}
+where $\mathrm{HMAC}$ is HMAC-SHA256 \cite{fips180-4} and $r_{m^{-1}(i)}$ is the 96-bit descriptor that block $i$ physically carries, that of block $m^{-1}(i)$. The implementation also prepends a format tag, geometry, channel and variant code and length-prefixes $ID$ for unambiguous encoding.
+
+Each bound field defeats a specific attack. $ID$ binds the tag to one image, so a block lifted from another image fails. The index $i$ binds position, so swapping blocks or assembling a collage from authentic blocks fails \cite{holliman2000counterfeiting,fridrich2002security}. $\mathrm{MSB}(b_i)$ binds content, so any visible edit of the six high planes fails. The carried descriptor $r_{m^{-1}(i)}$ binds the recovery payload: without it, three quarters of the embedded bits would be unauthenticated, and an attacker could overwrite every descriptor while no block is flagged, so recovery would present forged content as restored. With it, altering a descriptor breaks the tag of the block that carries it. Forging a tag without $K_s$ succeeds with probability $2^{-32}$ per block.
+
+\subsection{Embedding}
+\label{ssec:embed}
+The descriptor a block carries is computed first, since it depends only on the MSB planes of block $m^{-1}(i)$. Each of a block's 64 pixels carries two payload bits: the first 16 carry the tag and the remaining 48 the descriptor. Descriptor bits are written by LSB \emph{shifting} \cite{ausr1}: a pixel moves to the nearest value whose two low bits equal the target bits, possibly one quantization window away, lowering mean distortion to about 0.5~LSB against about 1.5~LSB for replacement. Tag-carrying pixels are never shifted, since a shift can change their MSB projection and make the tag depend on its own output. The tag is computed over the MSB planes as stored, after the shift.
+
+One map $m$ serves all three channels, each carrying its own tag and descriptor; a per-channel map would make a block recoverable in one channel but not another, producing color-fringed recovery and three unrecoverable masks.
+
+\subsection{Verification and Recovery}
+\label{ssec:verify}
+The verifier regenerates $m$, extracts the stored tag and descriptor of every block, recomputes (\ref{eq:tag}) over the received MSB planes and the descriptor bits actually present, and compares. A block is flagged if any channel mismatches, yielding the block mask $T$. A light 8-neighbor pass fills unflagged blocks almost fully surrounded by flagged ones; it never clears a flagged block, since an exact keyed comparison yields no false positives to remove. The block mask is expanded to pixels by block replication.
+
+Recovery splits $T$ by backup location. Block $i\in T$ is rebuilt from the descriptor at $m(i)$ if that block verified. The set $U=\{i\in T:\ m(i)\in T\}$ is unrecoverable, as both block and backup were destroyed; these blocks are marked with a fixed value, not fabricated. The recoverability rate is
+\begin{equation}
+\rho=1-|U|/|T|.
+\label{eq:rho}
+\end{equation}
+For a map independent of the tampered region, a flagged block's partner falls inside the region with probability close to the tampered fraction $\alpha$, so
+\begin{equation}
+\mathrm{E}[\rho]\approx 1-\alpha.
+\label{eq:bound}
+\end{equation}
+This expectation is structural, depending on region coverage and not on descriptor fidelity.
+
+Cost is one keyed hash and one $B\times B$ transform per block, so embedding and verification are $O(MN)$ without iteration, training or GPU. On a $512\times512\times3$ image, single-threaded Python on a commodity AMD x86-64 CPU measures 473~ms for embedding and 197~ms for verification.

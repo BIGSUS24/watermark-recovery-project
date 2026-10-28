@@ -1,0 +1,6 @@
+\section{Conclusion and Future Work}
+\label{sec:conclusion}
+
+This paper presents a deterministic, training-free, key-seeded self-embedding fragile watermark that localizes tampering at block granularity and rebuilds flagged blocks from a distant partner, or marks them unrecoverable. At 45.479~dB and SSIM 0.98847 on the corpus, the embedding is imperceptible. Block recall is 1.0000 for three of four tamper classes, and the recoverability rate $\rho$ tracks its structural bound with no collapse. Embedding takes 473~ms and verification 197~ms on a $512\times512$ color image, single-threaded and without a GPU. The unrecoverable fraction is disclosed rather than excluded, and the weaker in-region quality on the foliage-dominated photograph is reported as such.
+
+The highest-value upgrade is named directly by the finding that mapping coverage dominates recovery quality: reference sharing or fountain-coded allocation \cite{zhang2011reference,korus2013efficient} would raise coverage without enlarging the descriptor. Further directions are a semi-fragile mode tolerant of benign JPEG re-encoding \cite{linchang2000}, hierarchical localization grids that avoid paying the full tag cost at every level, and integration into capture firmware and PACS ingest.

@@ -1,0 +1,28 @@
+\begin{table}[t]
+\caption{Localization and Recovery Against Tamper Ratio. Block-Level Recall Is
+1.0000 in Every Row (0.99998 for Inpainting); Block-Level Precision Is 1.0000
+Throughout and Is Structurally Forced by the Ground-Truth Rule}
+\label{tab:results}
+\centering
+\begin{tabular}{ccccc}
+\toprule
+ & \multicolumn{3}{c}{32-image main grid} & Photograph \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-5}
+$\alpha$ & px.\ prec. & $\rho$ & bound $1-\alpha$ & $\rho$ \\
+\midrule
+0.10 & 0.9248 & 0.9590 & 0.90 & 0.9775 \\
+0.20 & 0.9481 & 0.8584 & 0.80 & 0.8694 \\
+0.30 & 0.9581 & 0.7479 & 0.70 & 0.7500 \\
+0.40 & 0.9643 & 0.6371 & 0.60 & 0.6356 \\
+0.50 & 0.9701 & 0.5335 & 0.50 & 0.5163 \\
+0.60 & 0.9740 & 0.4437 & 0.40 & 0.4222 \\
+0.70 & 0.9797 & 0.3579 & 0.30 & 0.3154 \\
+\midrule
+mean & 0.9599 & 0.6482 & --- & 0.6409 \\
+\bottomrule
+\end{tabular}
+\\[2pt]
+\footnotesize Corpus rows are means over four tamper classes and both descriptor
+variants; the achieved tampered area reaches only 0.573 and 0.653 at nominal 0.60
+and 0.70 on the corpus, so those two rows are nominal only.
+\end{table}
