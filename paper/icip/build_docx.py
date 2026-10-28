@@ -11,8 +11,6 @@ this reuses it and only fixes what is different here:
   * this paper uses plain \includegraphics inside figure*, not the long paper's
     \figorbox macro -- Word has no two-column floats and cannot display a PDF
     image, so each figure becomes a 3.4 in PNG in the column;
-  * the author block carries \IEEEauthorrefmark footnote marks, which pandoc
-    does not know;
   * \graphicspath and \balance are LaTeX-only and are dropped.
 
 Usage:  python paper/icip/build_docx.py [--skip-pdf]
@@ -32,7 +30,6 @@ import build_docs as bd  # noqa: E402
 PAPER = ROOT / "paper" / "ICIP_Paper.tex"
 OUTDIR = bd.OUTDIR
 FIGDIR = bd.FIGDIR
-MARKS = {"1": "*", "2": "\u2020", "3": "\u2021", "4": "\u00a7"}
 
 
 def prep(tex: str) -> tuple[str, dict]:
@@ -41,11 +38,6 @@ def prep(tex: str) -> tuple[str, dict]:
     tex = re.sub(r"\\graphicspath\{[^\n]*\}\n", "", tex)
     tex = tex.replace("\\balance\n", "")
     tex = re.sub(r"\\IEEEoverridecommandlockouts\n", "", tex)
-
-    # footnote marks on the authors: pandoc drops the macro and would silently
-    # glue the mark's digit onto the name or the e-mail address
-    tex, counts["authormarks"] = re.subn(
-        r"\\IEEEauthorrefmark\{(\d)\}", lambda m: MARKS[m.group(1)], tex)
 
     # Word has no two-column float; each figure sits in the column at 3.4 in
     tex, n1 = re.subn(r"\\(begin|end)\{figure\*\}", r"\\\1{figure}", tex)
@@ -94,7 +86,7 @@ def main() -> int:
     print("\n== DOCX (IEEE format via pandoc) ==")
     tex, c = prep(PAPER.read_text(encoding="utf-8"))
     print(f"  rewrote: {c['graphics']} figures, {c['spanning_floats']} spanning floats, "
-          f"{c['authormarks']} author marks, {c['refs']} refs, {c['cites']} cite "
+          f"{c['refs']} refs, {c['cites']} cite "
           f"groups, {c['eq_labels']} equation numbers")
     bd.ck(not c["unresolved"], "every ref and cite resolved to a number", c["unresolved"])
     bd.ck(c["graphics"] == 3 and c["authorblocks"] == 1 and c["abstract"] == 1
