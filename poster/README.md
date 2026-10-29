@@ -12,6 +12,7 @@ page with cut marks and trimmed down.
 | `../output/poster/Poster_A3_sheets.pdf` | page 1 assembly map, page 2 title band (A4 landscape), pages 3–8 panels 1–6 (A4 portrait) |
 | `../output/poster/Poster_A3_preview.pdf` | the finished poster on a single A3 page, for checking before printing |
 | `../output/poster/assets/` | the greyscale worked example and its numbers |
+| `../output/poster/assets/colour/` | the same five frames in colour, red/cyan mask, for slides or screen |
 
 Layout on the A3: a 271 × 40 mm title band across the top, then a 2 × 3 grid of
 132 × 111 mm panels read down the left column and then down the right. Margins are

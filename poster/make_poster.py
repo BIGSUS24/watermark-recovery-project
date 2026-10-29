@@ -96,6 +96,14 @@ def build_assets(refresh: bool = False) -> dict:
         out[unrec_px] = 150.0
         return np.clip(out, 0, 255).astype(np.uint8)
 
+    # the same trial twice: once with the paper's red/cyan overlay for anyone who
+    # wants the frames in colour, once in print tones for the poster itself
+    colour = ASSETS / "colour"
+    colour.mkdir(exist_ok=True)
+    _, rgb = rp.trial(raw, wm, key, iid, "splice", 0.30, "A")
+    for i, img in enumerate(rgb.values()):
+        plt.imsave(colour / f"demo{i}.png", np.asarray(img, dtype=np.uint8))
+
     rp.overlay = bw_mask  # rp.trial() builds the strip through this name
     row, panels = rp.trial(raw, wm, key, iid, "splice", 0.30, "A")
 
