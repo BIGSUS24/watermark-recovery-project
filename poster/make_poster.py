@@ -212,6 +212,23 @@ def sheet(size, box, piece, place):
     return fig, inner
 
 
+def fits(fig, ax, box, pad=1.2):
+    """Every text drawn in ax, measured, must sit inside the piece with a margin.
+
+    Eyeballing the band was what let the e-mail line sit on the bottom rule, so the
+    build measures it: rendered extents, converted back to mm, checked against the box.
+    """
+    fig.canvas.draw()
+    inv = ax.transData.inverted()
+    bad = []
+    for t in ax.texts:
+        bb = t.get_window_extent(fig.canvas.get_renderer())
+        (x0, y0), (x1, y1) = inv.transform(((bb.x0, bb.y0), (bb.x1, bb.y1)))
+        if x0 < pad or y0 < pad or x1 > box[0] - pad or y1 > box[1] - pad:
+            bad.append(f"{t.get_text()[:34]!r} at x {x0:.1f}..{x1:.1f}, y {y0:.1f}..{y1:.1f}")
+    return bad
+
+
 def frame(ax, box, border=True):
     ax.set_xlim(0, box[0])
     ax.set_ylim(0, box[1])
@@ -225,26 +242,30 @@ def frame(ax, box, border=True):
 # --------------------------------------------------------------------------- pieces
 
 def title_band(ax, box):
-    """Kept as ink on white: a 271 x 40 mm solid black block is a toner sink."""
-    ax.plot([0, box[0]], [box[1] - 2.4] * 2, color=INK, lw=2.6)
-    ax.plot([0, box[0]], [2.4] * 2, color=INK, lw=2.6)
-    ax.text(box[0] / 2, box[1] - 6.0,
+    """Kept as ink on white: a 271 x 40 mm solid black block is a toner sink.
+
+    Every line is placed from the top of the band, so the stack below is what keeps
+    the e-mail line clear of the bottom rule -- it is the tightest fit in the piece.
+    """
+    ax.plot([0, box[0]], [box[1] - 2.2] * 2, color=INK, lw=2.6)
+    ax.plot([0, box[0]], [2.2] * 2, color=INK, lw=2.6)
+    ax.text(box[0] / 2, box[1] - 4.8,
             "Watermark-Guided Tamper Localization and Recovery",
-            ha="center", va="top", fontsize=21, color=INK, fontweight="bold")
-    ax.text(box[0] / 2, box[1] - 15.2,
+            ha="center", va="top", fontsize=20, color=INK, fontweight="bold")
+    ax.text(box[0] / 2, box[1] - 13.6,
             "A Key-Seeded Self-Embedding Fragile Watermarking Scheme with "
             "Joint Localization and Restoration Assessment",
-            ha="center", va="top", fontsize=10.5, color=INK, style="italic")
-    ax.plot([70, box[0] - 70], [box[1] - 21.0] * 2, color=MID, lw=0.5)
-    ax.text(box[0] / 2, box[1] - 23.4,
+            ha="center", va="top", fontsize=10, color=INK, style="italic")
+    ax.plot([70, box[0] - 70], [box[1] - 18.8] * 2, color=MID, lw=0.5)
+    ax.text(box[0] / 2, box[1] - 21.0,
             "Tejas Mane$^{1}$      Shivam Singh$^{2}$      Amol Hipparkar$^{3}$"
             "            Guide:  Dr. Deepti Varshney",
-            ha="center", va="top", fontsize=11.5, color=INK)
-    ax.text(box[0] / 2, box[1] - 30.2,
+            ha="center", va="top", fontsize=11, color=INK)
+    ax.text(box[0] / 2, box[1] - 27.4,
             "Department of Computer Engineering, Ajeenkya DY Patil School of "
             "Engineering, Pune, India",
-            ha="center", va="top", fontsize=9, color=INK)
-    ax.text(box[0] / 2, box[1] - 34.8,
+            ha="center", va="top", fontsize=8.8, color=INK)
+    ax.text(box[0] / 2, box[1] - 32.6,
             "$^{1}$manetejas710@gmail.com      $^{2}$notshivamsingh@gmail.com      "
             "$^{3}$amolhipparkar04@gmail.com",
             ha="center", va="top", fontsize=7.8, color=MID)
@@ -542,6 +563,8 @@ def main() -> int:
 
         fig, ax = sheet(A4L, BAND, "TITLE BAND", "across the top of the chart")
         title_band(ax, BAND)
+        over = fits(fig, ax, BAND)
+        assert not over, "title band text runs off the piece: " + "; ".join(over)
         pdf.savefig(fig)
         plt.close(fig)
 
