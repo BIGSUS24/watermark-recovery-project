@@ -15,6 +15,7 @@ const state = {
   verifyFile: null,
   wmSrc: null, diffSrc: null, wmCaption: "",
   stageTabs: [], verifyTabs: [],
+  libraryRecords: [], lastDeletedId: null,
 };
 
 /* --- plumbing ------------------------------------------------------------- */
@@ -67,6 +68,7 @@ const stat = (k, v, x) =>
   `<div class="stat-v">${v}</div><div class="stat-x">${x || ""}</div></div>`;
 
 const show = (el, on = true) => { el.hidden = !on; };
+const setProgress = (id, on) => { const el = $(id); if (el) el.hidden = !on; };
 
 function fileToDataURL(file) {
   return new Promise((resolve, reject) => {
@@ -126,12 +128,35 @@ window.addEventListener("hashchange", () => goto(location.hash.slice(1) || "prot
 
 /* --- reusable dropzone ---------------------------------------------------- */
 
-function wireDrop(dropId, inputId, fileId, onPick) {
+async function renderFilePreview(file, previewId) {
+  const out = $(previewId);
+  if (!out) return;
+  out.hidden = false;
+  if (!file.type.startsWith("image/")) {
+    out.textContent = `${file.name} — preview unavailable for this format`;
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    out.innerHTML = `<img src="${url}" alt="Selected image preview">` +
+      `<span>${img.naturalWidth}×${img.naturalHeight} px</span>`;
+    URL.revokeObjectURL(url);
+  };
+  img.onerror = () => {
+    out.textContent = `${file.name} — preview unavailable`;
+    URL.revokeObjectURL(url);
+  };
+  img.src = url;
+}
+
+function wireDrop(dropId, inputId, fileId, onPick, previewId) {
   const drop = $(dropId), input = $(inputId), out = $(fileId);
   const accept = (file) => {
     if (!file) return;
     out.hidden = false;
     out.innerHTML = `<strong>${esc(file.name)}</strong> &middot; ${fmtBytes(file.size)}`;
+    if (previewId) renderFilePreview(file, previewId);
     onPick(file);
   };
   input.addEventListener("change", () => accept(input.files[0]));
@@ -216,7 +241,8 @@ async function loadSamples() {
 document.querySelectorAll(".seg-btn").forEach((btn) =>
   btn.addEventListener("click", () => selectSource(btn.dataset.src)));
 
-wireDrop("protect-drop", "upload-input", "protect-file", (f) => { state.protectFile = f; });
+wireDrop("protect-drop", "upload-input", "protect-file",
+  (f) => { state.protectFile = f; }, "protect-preview");
 
 // Variant C only exists at block size 8 (src/payload.py's C_DESC_BITS table is defined
 // only at that width) -- the server 400s the combination, but disabling the option here
@@ -235,6 +261,25 @@ function syncVariantForBlock() {
 $("block-select").addEventListener("change", syncVariantForBlock);
 syncVariantForBlock();
 
+function randomKey() {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+$("key-toggle").addEventListener("click", () => {
+  const input = $("key-input");
+  const visible = input.type === "text";
+  input.type = visible ? "password" : "text";
+  $("key-toggle").textContent = visible ? "Show" : "Hide";
+});
+
+$("key-generate").addEventListener("click", () => {
+  $("key-input").value = randomKey();
+  $("key-input").type = "text";
+  $("key-toggle").textContent = "Hide";
+});
+
 function resetProtectDownstream() {
   ["protect-test", "damage-out", "check-out", "repair-out"].forEach((id) => show($(id), false));
   ["damage-status", "check-status", "repair-status"].forEach((id) => { $(id).textContent = ""; });
@@ -245,6 +290,7 @@ function resetProtectDownstream() {
 async function runProtect(pageNum) {
   const st = $("protect-status");
   setStatus(st, "Embedding the watermark…", { loading: true });
+  setProgress("protect-progress", true);
   try {
     const body = {
       key: $("key-input").value,
@@ -319,6 +365,8 @@ async function runProtect(pageNum) {
     updateNavCount(d.library_size);
   } catch (e) {
     setStatus(st, e.message, { error: true });
+  } finally {
+    setProgress("protect-progress", false);
   }
 }
 
@@ -351,6 +399,7 @@ function protectAllCard(r) {
 $("protect-all-btn").addEventListener("click", () => withBusy($("protect-all-btn"), async () => {
   const st = $("protect-all-status");
   setStatus(st, "Protecting every page…", { loading: true });
+  setProgress("protect-progress", true);
   try {
     if (!state.protectFile) throw new Error("Choose a file to protect first.");
     const body = {
@@ -370,6 +419,8 @@ $("protect-all-btn").addEventListener("click", () => withBusy($("protect-all-btn
     setStatus(st, "Done.");
   } catch (e) {
     setStatus(st, e.message, { error: true });
+  } finally {
+    setProgress("protect-progress", false);
   }
 }));
 
@@ -521,7 +572,7 @@ $("repair-btn").addEventListener("click", () => withBusy($("repair-btn"), async 
 wireDrop("verify-drop", "verify-input", "verify-file", (f) => {
   state.verifyFile = f;
   $("verify-btn").disabled = false;
-});
+}, "verify-preview");
 
 function matchCard(d) {
   const m = d.matched;
@@ -565,6 +616,7 @@ $("verify-btn").addEventListener("click", () => withBusy($("verify-btn"), async 
   const errNote = $("verify-error-note");
   show(errNote, false);
   setStatus(st, "Searching the library and verifying…", { loading: true });
+  setProgress("verify-progress", true);
   try {
     if (!state.verifyFile) throw new Error("Choose a file to verify first.");
     const d = await postJSON("/api/verify", {
@@ -582,6 +634,8 @@ $("verify-btn").addEventListener("click", () => withBusy($("verify-btn"), async 
     setStatus(st, "Verification failed — see details below.", { error: true });
     errNote.textContent = e.message;
     show(errNote, true);
+  } finally {
+    setProgress("verify-progress", false);
   }
 }));
 
@@ -716,8 +770,8 @@ async function loadLibrary() {
   setStatus(st, "Loading…", { loading: true });
   try {
     const { records } = await api("/api/library");
-    $("library-grid").innerHTML = records.map(libCard).join("");
-    show($("library-empty"), records.length === 0);
+    state.libraryRecords = records;
+    renderLibrary();
     updateNavCount(records.length);
     setStatus(st, `${records.length} protected image${records.length === 1 ? "" : "s"} stored.`);
   } catch (e) {
@@ -725,7 +779,36 @@ async function loadLibrary() {
   }
 }
 
+function renderLibrary() {
+  const query = $("library-search").value.trim().toLowerCase();
+  const sort = $("library-sort").value;
+  const records = state.libraryRecords
+    .filter((r) => !query ||
+      `${r.name} ${r.variant} ${r.width}x${r.height}`.toLowerCase().includes(query))
+    .sort((a, b) => sort === "name"
+      ? a.name.localeCompare(b.name)
+      : sort === "oldest" ? a.id - b.id : b.id - a.id);
+  $("library-grid").innerHTML = records.map(libCard).join("");
+  show($("library-empty"), records.length === 0);
+}
+
 $("library-refresh").addEventListener("click", loadLibrary);
+$("library-search").addEventListener("input", renderLibrary);
+$("library-sort").addEventListener("change", renderLibrary);
+$("library-undo").addEventListener("click", async () => {
+  const id = state.lastDeletedId;
+  if (id === null) return;
+  await withBusy($("library-undo"), async () => {
+    try {
+      await api(`/api/library/${id}/restore`, { method: "POST" });
+      state.lastDeletedId = null;
+      show($("library-undo"), false);
+      await loadLibrary();
+    } catch (err) {
+      setStatus($("library-status"), err.message, { error: true });
+    }
+  });
+});
 
 $("library-grid").addEventListener("click", async (e) => {
   const btn = e.target.closest("button[data-act]");
@@ -738,8 +821,10 @@ $("library-grid").addEventListener("click", async (e) => {
     await withBusy(btn, async () => {
       try {
         const d = await api(`/api/library/${id}`, { method: "DELETE" });
+        state.lastDeletedId = Number(id);
+        show($("library-undo"));
         updateNavCount(d.library_size);
-        loadLibrary();
+        await loadLibrary();
       } catch (err) {
         setStatus($("library-status"), err.message, { error: true });
       }
@@ -854,6 +939,12 @@ $("evidence-btn").addEventListener("click", () => withBusy($("evidence-btn"), as
     setStatus(st, e.message, { error: true });
   }
 }));
+
+document.addEventListener("click", (e) => {
+  if (e.target.matches(".compare img, .frame img")) {
+    e.target.classList.toggle("is-zoomed");
+  }
+});
 
 /* --- init ----------------------------------------------------------------- */
 

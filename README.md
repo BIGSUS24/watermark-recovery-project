@@ -222,6 +222,12 @@ leaving the page), a library view with per-record download/verify/delete, the tw
 adversarial set-pieces, and a per-block evidence panel. Flask plus hand-written
 HTML/CSS/JS -- no build step, no CDN, no external network requests.
 
+The web app also previews uploaded images and their dimensions, shows progress
+while protection or verification is running, supports library search/sorting and
+undo for the existing soft-delete behavior, and lets you click comparison images
+to zoom. Secret-key fields are masked by default, can generate a random key, and
+can be shown temporarily when needed.
+
 "How it works" opens with an animated 3-D model of the scheme (`webapp/static/scene3d.js`):
 64 block towers over three planes, cycling embed -> protected -> tampered -> detect ->
 recover, draggable and keyboard-orbitable. It is not decoration -- the block-to-partner
@@ -239,11 +245,12 @@ a different file, which is how the test suite avoids touching your real one.
 pipeline, kept as a fallback for presenting. It has no library and no upload
 verification -- those live only in `webapp/`.
 
-One honest note on the library: it stores each image's key in the clear, in the same
-row as the image. That is right for a local single-user tool and wrong for a
-deployment, where keys belong in an OS keyring, HSM, or KMS and never beside the
-artefact they authenticate. The scheme's entire security argument rests on the
-attacker not holding the key.
+One honest note on the library: keys are encrypted at rest with AES-256-GCM when
+`WATERMARK_MASTER_KEY` is configured; an existing plaintext-key database must be
+started explicitly with `--allow-plaintext-keys` until it is migrated. For a real
+deployment, the master key belongs in an OS keyring, HSM, or KMS rather than an
+environment variable. The scheme's entire security argument rests on the
+attacker not holding the usable key.
 
 ## What Phase A changed (things you'll notice)
 
@@ -286,6 +293,14 @@ attacker not holding the key.
   verification (JPEG, lossy WebP, GIF, a rasterised PDF page) now returns a
   specific explanation of why a lossy re-encode destroys the two LSB planes the
   watermark lives in, instead of an unexplained HTTP 400.
+- **Web UI usability and recovery controls.** Upload previews, progress
+  indicators, library search/sorting, click-to-zoom comparisons, generated
+  secret keys, and an **Undo last delete** action are available in the Flask
+  application. The restore action uses `POST /api/library/<id>/restore` and
+  preserves the existing soft-delete model.
+- **Focused web regression tests.** Run `python webapp/test_features.py` to
+  check the library restore endpoint and the presence of the new frontend
+  controls in an isolated temporary database.
 
 ## Reproducing the results
 

@@ -893,6 +893,18 @@ def api_library_delete(rid):
         con.close()
 
 
+@app.route("/api/library/<int:rid>/restore", methods=["POST"])
+@guarded
+def api_library_restore(rid):
+    con = db.connect()
+    try:
+        if not db.restore(con, rid):
+            raise ApiError(f"no deleted protected image with id {rid}", 404)
+        return ok(restored=rid, library_size=db.count(con))
+    finally:
+        con.close()
+
+
 @app.route("/api/export", methods=["POST"])
 @guarded
 def api_export():

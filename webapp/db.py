@@ -387,6 +387,15 @@ def delete(con, rid: int) -> bool:
     return cur.rowcount > 0
 
 
+def restore(con, rid: int) -> bool:
+    """Undo a soft delete while the row is still retained in the library."""
+    cur = con.execute(
+        "UPDATE protected SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL",
+        (int(rid),))
+    con.commit()
+    return cur.rowcount > 0
+
+
 def purge(con, older_than_days: int = 30) -> int:
     """Hard-delete rows soft-deleted more than `older_than_days` days ago. This is
     the only irreversible step in the soft-delete story -- delete() never is."""

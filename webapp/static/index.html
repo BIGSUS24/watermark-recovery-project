@@ -95,6 +95,7 @@
             <span class="drop-sub">PNG, JPEG, PDF, BMP, TIFF, WebP or GIF — the protected file you download back is always a lossless PNG</span>
           </label>
           <div class="drop-file" id="protect-file" hidden></div>
+          <div class="file-preview" id="protect-preview" hidden></div>
         </div>
 
         <details class="adv">
@@ -102,7 +103,11 @@
           <div class="grid grid-4">
             <div class="field">
               <label class="lbl" for="key-input">Secret key</label>
-              <input type="text" id="key-input" value="watermark-secret">
+              <div class="input-actions">
+                <input type="password" id="key-input" value="watermark-secret">
+                <button class="btn btn-ghost btn-sm" type="button" id="key-toggle">Show</button>
+                <button class="btn btn-ghost btn-sm" type="button" id="key-generate">Generate</button>
+              </div>
             </div>
             <div class="field">
               <label class="lbl" for="id-input">Image identity</label>
@@ -126,6 +131,8 @@
           </div>
           <p class="fine">The key and identity are what make the watermark forgery-resistant.
             Both are stored with the image in the local library so it can be verified again later.
+            Generate a unique key for important images. For encrypted key storage, restart the
+            app with <code>WATERMARK_MASTER_KEY</code> configured.
             Descriptor C measures the highest recovered fidelity of the three and is the default,
             but it only exists at block size 8 — picking a 4×4 block switches the descriptor back
             to A automatically.</p>
@@ -133,6 +140,7 @@
 
         <div class="actions">
           <button class="btn btn-primary" id="protect-btn">Protect this image</button>
+          <progress class="progress" id="protect-progress" max="1" hidden></progress>
           <span class="status" id="protect-status"></span>
         </div>
       </article>
@@ -145,6 +153,7 @@
 
         <div class="stats" id="protect-stats"></div>
         <p class="warn-note" id="protect-source-note" hidden></p>
+        <p class="warn-note" id="protect-relax-note" hidden></p>
 
         <div class="compare">
           <figure><img id="img-original" alt="Original image"><figcaption>Original</figcaption></figure>
@@ -285,9 +294,11 @@
             re-save (JPEG, WebP, GIF) always destroys the watermark first</span>
         </label>
         <div class="drop-file" id="verify-file" hidden></div>
+        <div class="file-preview" id="verify-preview" hidden></div>
         <p class="warn-note" id="verify-error-note" hidden></p>
         <div class="actions">
           <button class="btn btn-primary" id="verify-btn" disabled>Identify and verify</button>
+          <progress class="progress" id="verify-progress" max="1" hidden></progress>
           <span class="status" id="verify-status"></span>
         </div>
       </article>
@@ -366,7 +377,15 @@
           needed to verify it again. This is what an uploaded file gets matched against.</p>
       </header>
       <div class="actions">
+        <input type="search" id="library-search" placeholder="Search by filename or variant"
+               aria-label="Search protected images">
+        <select id="library-sort" aria-label="Sort library">
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="name">Name</option>
+        </select>
         <button class="btn btn-ghost btn-sm" id="library-refresh">Refresh</button>
+        <button class="btn btn-ghost btn-sm" id="library-undo" hidden>Undo last delete</button>
         <span class="status" id="library-status"></span>
       </div>
       <div class="lib-grid" id="library-grid"></div>
